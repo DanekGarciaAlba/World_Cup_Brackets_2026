@@ -1,42 +1,29 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import "./globals.css";
+import { Geist, Geist_Mono } from "next/font/google";
+import { AppShell } from "@/components/layout/AppShell";
+import { StadiumBackground } from "@/components/layout/StadiumBackground";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+
+const geistSans = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
 
 export const metadata: Metadata = {
-  title: "World Cup Pool",
-  description: "Office World Cup prediction pool infrastructure",
+  title: "World Cup Brackets 2026",
+  description: "Free office World Cup prediction pool for fixtures, brackets, rivals, and standings.",
 };
-
-const links = [
-  ["/", "Dashboard"],
-  ["/login", "Login"],
-  ["/picks", "Picks"],
-  ["/groups", "Groups"],
-  ["/bracket", "Bracket"],
-  ["/leaderboard", "Leaderboard"],
-  ["/rivals", "Rivals"],
-  ["/admin", "Admin"],
-  ["/admin/system-check", "System Check"],
-];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body>
-        <main className="shell">
-          <header>
-            <p className="muted">Office World Cup Pool</p>
-            <h1>World Cup Brackets 2026</h1>
-            <nav className="nav">
-              {links.map(([href, label]) => (
-                <Link href={href} key={href}>
-                  {label}
-                </Link>
-              ))}
-            </nav>
-          </header>
-          {children}
-        </main>
+    <html lang="en" className="dark">
+      <body className={cn("font-sans antialiased", geistSans.variable, geistMono.variable)}>
+        <TooltipProvider delayDuration={120}>
+          <StadiumBackground />
+          <AppShell>{children}</AppShell>
+          <Toaster position="top-right" richColors closeButton />
+        </TooltipProvider>
       </body>
     </html>
   );

@@ -1,8 +1,16 @@
+import { BracketBoard } from "@/components/bracket/BracketBoard";
+import { PageHeader } from "@/components/layout/PageHeader";
+
 export default function BracketPage() {
   return (
-    <section className="card">
-      <h2>Bracket Placeholder</h2>
-      <p className="muted">The Round of 32 bracket remains projected until provider data confirms it.</p>
-    </section>
+    <div>
+      <PageHeader
+        eyebrow="Knockout Path"
+        title="Build the road to the final."
+        description="Project each round before the bracket goes live. Slots can be replaced by confirmed API-Football fixtures once qualification is known."
+        badge="Projected bracket"
+      />
+      <BracketBoard />
+    </div>
   );
 }

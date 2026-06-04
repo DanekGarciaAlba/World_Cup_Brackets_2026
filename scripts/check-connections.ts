@@ -24,6 +24,9 @@ const requiredTables = [
   "leaderboard_cache",
   "mini_leagues",
   "mini_league_members",
+  "mini_league_activity",
+  "user_avatars",
+  "user_emote_events",
   "sync_logs",
   "system_settings",
 ];
