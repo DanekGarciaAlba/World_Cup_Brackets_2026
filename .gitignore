@@ -8,3 +8,5 @@ out/
 dist/
 coverage/
 *.tsbuildinfo
+
+.vercel
