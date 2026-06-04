@@ -4,18 +4,18 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser } from "@/lib/auth/requireUser";
 
 export async function requireAdmin() {
-  const claims = await requireUser();
-  const email = typeof claims.email === "string" ? claims.email.toLowerCase() : "";
+  const user = await requireUser();
+  const email = typeof user.email === "string" ? user.email.toLowerCase() : "";
   const allowed = adminEmails();
 
   if (allowed.includes(email)) {
-    return claims;
+    return user;
   }
 
   if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
     const admin = createAdminClient();
-    const { data } = await admin.from("profiles").select("role").eq("id", claims.sub).maybeSingle();
-    if (data?.role === "admin") return claims;
+    const { data } = await admin.from("profiles").select("role").eq("id", user.id).maybeSingle();
+    if (data?.role === "admin") return user;
   }
 
   throw new Error("Admin access required");

@@ -14,7 +14,11 @@ export function AdminActionPanel() {
       const response = await fetch(url, { method: "POST" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
-      toast.success(`${label} completed`);
+      toast.success(`${label} completed`, {
+        description: payload?.imported
+          ? `${payload.imported.teams} teams, ${payload.imported.fixtures} fixtures, ${payload.imported.standings} standings rows.`
+          : payload?.message,
+      });
     } catch (error) {
       toast.error(`${label} failed`, {
         description: error instanceof Error ? error.message : "Check admin login and server logs.",

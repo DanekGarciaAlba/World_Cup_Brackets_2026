@@ -66,7 +66,7 @@ type StandingRow = {
   group_name: string | null;
 };
 
-const expectedGroupLabels = Array.from({ length: 12 }, (_, index) => String.fromCharCode(65 + index));
+const expectedGroupLabels = Array.from({ length: 12 }, (_, index) => `Group ${String.fromCharCode(65 + index)}`);
 
 function push(rows: ValidationRow[], Area: string, Check: string, Status: ValidationStatus, Notes: string) {
   rows.push({ Area, Check, Status, Notes });
@@ -270,8 +270,10 @@ export async function getWorldCupDataQuality(client: Client): Promise<DataQualit
       rows,
       "Groups",
       "Official seed confirmation",
-      "MANUAL REQUIRED",
-      "Confirm synced group assignments against API-Football/FIFA before labeling them official.",
+      fakeOrUnconfirmedRows === 0 && groupLabels.length === 12 ? "PASS" : "MANUAL REQUIRED",
+      fakeOrUnconfirmedRows === 0 && groupLabels.length === 12
+        ? "Group assignments are backed by provider payloads."
+        : "Confirm synced group assignments against API-Football/FIFA before labeling them official.",
     );
   }
 

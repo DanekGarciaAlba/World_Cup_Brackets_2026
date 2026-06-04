@@ -21,7 +21,11 @@ export function DataQualityPanel({ initial }: DataQualityPanelProps) {
       const response = await fetch("/api/admin/sync-now", { method: "POST" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
-      toast.success("Sync probe completed");
+      toast.success("World Cup data synced", {
+        description: payload?.imported
+          ? `${payload.imported.teams} teams, ${payload.imported.fixtures} fixtures, ${payload.imported.standings} standings rows.`
+          : "Provider data imported.",
+      });
       await revalidate();
     } catch (error) {
       toast.error("Sync failed", {
