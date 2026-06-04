@@ -1,12 +1,17 @@
 import Link from "next/link";
 import { AdminActionPanel } from "@/components/admin/AdminActionPanel";
+import { SyncStatusCards } from "@/components/admin/SyncStatusCards";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { getWorldCupDataQuality } from "@/lib/data/worldCupValidation";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getSystemStatus } from "@/lib/system/status";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminPage() {
-  const status = await getSystemStatus();
+  const [status, quality] = await Promise.all([getSystemStatus(), getWorldCupDataQuality(createAdminClient())]);
 
   return (
     <div>
@@ -16,11 +21,19 @@ export default async function AdminPage() {
         description="Run syncs, recalculate the leaderboard, and inspect the live backend readiness checks without exposing any secrets."
         badge="Protected actions"
         action={
-          <Button asChild variant="secondary">
-            <Link href="/admin/system-check">System check</Link>
-          </Button>
+          <div className="flex gap-2">
+            <Button asChild variant="secondary">
+              <Link href="/admin/data-quality">Data quality</Link>
+            </Button>
+            <Button asChild variant="secondary">
+              <Link href="/admin/system-check">System check</Link>
+            </Button>
+          </div>
         }
       />
+      <div className="mb-5">
+        <SyncStatusCards quality={quality} />
+      </div>
       <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
         <AdminActionPanel />
         <div className="grid gap-3 md:grid-cols-2">

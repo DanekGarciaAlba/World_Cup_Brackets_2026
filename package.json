@@ -10,6 +10,7 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "check:connections": "tsx scripts/check-connections.ts",
+    "validate:worldcup": "tsx scripts/validate-world-cup-data.ts",
     "test:api-football": "node scripts/test-api-football.mjs"
   },
   "dependencies": {
@@ -24,6 +25,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "embla-carousel-react": "^8.6.0",
     "lucide-react": "^1.17.0",
     "motion": "^12.40.0",
     "next": "^16.2.7",

@@ -1,21 +1,38 @@
-import { GroupPredictionBoard } from "@/components/groups/GroupPredictionBoard";
+import { DataQualityNotice } from "@/components/groups/DataQualityNotice";
+import { GroupPredictionSummary } from "@/components/groups/GroupPredictionSummary";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { groups } from "@/lib/demo-data";
+import { PremiumGroupCard } from "@/components/groups/PremiumGroupCard";
+import { ThirdPlaceRacePanel } from "@/components/groups/ThirdPlaceRacePanel";
+import { getWorldCupDashboardData } from "@/lib/data/worldCupData";
 
-export default function GroupsPage() {
+export const dynamic = "force-dynamic";
+
+export default async function GroupsPage() {
+  const data = await getWorldCupDashboardData();
+
   return (
     <div>
       <PageHeader
         eyebrow="Group Stage"
-        title="Rank every group table."
-        description="Drag teams into final order, including the third-place race. The production save path will persist these rankings to Supabase."
-        badge="12 groups ready"
+        title="Rank official synced groups."
+        description="Groups render only from real synced team data. If the final draw is not available yet, this page shows validation warnings."
+        badge={`${data.groups.length}/12 groups`}
       />
-      <div className="grid gap-4 xl:grid-cols-2">
-        {groups.map((group) => (
-          <GroupPredictionBoard key={group.group} group={group.group} teams={group.teams} />
-        ))}
-      </div>
+      {data.groups.length === 0 ? (
+        <DataQualityNotice title="Group data pending sync" message="No synced group labels were found. Run Admin Sync or add an official admin-confirmed seed before opening group predictions." />
+      ) : (
+        <div className="grid gap-5">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <ThirdPlaceRacePanel groups={data.groups} />
+            <GroupPredictionSummary />
+          </div>
+          <div className="grid gap-4 xl:grid-cols-2">
+            {data.groups.map((group) => (
+              <PremiumGroupCard key={group.groupName} group={group} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

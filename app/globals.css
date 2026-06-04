@@ -8,38 +8,38 @@
 :root {
   color-scheme: dark;
   --radius: 0.5rem;
-  --background: #06101d;
-  --foreground: #f1f7ff;
-  --card: #0a1828;
+  --background: #030714;
+  --foreground: #f6f8ff;
+  --card: #0a1530;
   --card-foreground: #f1f7ff;
-  --popover: #0a1828;
+  --popover: #0a1530;
   --popover-foreground: #f1f7ff;
-  --primary: #35e0a1;
-  --primary-foreground: #04110c;
-  --secondary: #112842;
+  --primary: #5b6cff;
+  --primary-foreground: #f7f8ff;
+  --secondary: #121f43;
   --secondary-foreground: #e7f2ff;
-  --muted: #112237;
-  --muted-foreground: #9fb2c8;
-  --accent: #62b5ff;
-  --accent-foreground: #04111f;
-  --destructive: #ff5c7a;
+  --muted: #111b37;
+  --muted-foreground: #9da8c2;
+  --accent: #d8ad4c;
+  --accent-foreground: #0a0d18;
+  --destructive: #ff4d5f;
   --destructive-foreground: #ffffff;
-  --border: rgba(173, 211, 255, 0.16);
-  --input: rgba(173, 211, 255, 0.2);
-  --ring: #35e0a1;
-  --chart-1: #35e0a1;
-  --chart-2: #62b5ff;
-  --chart-3: #f7c948;
-  --chart-4: #ff7a90;
-  --chart-5: #b69cff;
-  --sidebar: #071321;
+  --border: rgba(119, 147, 255, 0.18);
+  --input: rgba(119, 147, 255, 0.22);
+  --ring: #7c8cff;
+  --chart-1: #5b6cff;
+  --chart-2: #d8ad4c;
+  --chart-3: #8bd86f;
+  --chart-4: #ff4d5f;
+  --chart-5: #7fd2ff;
+  --sidebar: #050a18;
   --sidebar-foreground: #e7f2ff;
-  --sidebar-primary: #35e0a1;
-  --sidebar-primary-foreground: #04110c;
-  --sidebar-accent: #10233a;
+  --sidebar-primary: #5b6cff;
+  --sidebar-primary-foreground: #f7f8ff;
+  --sidebar-accent: #121f43;
   --sidebar-accent-foreground: #e7f2ff;
-  --sidebar-border: rgba(173, 211, 255, 0.14);
-  --sidebar-ring: #35e0a1;
+  --sidebar-border: rgba(119, 147, 255, 0.18);
+  --sidebar-ring: #7c8cff;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -94,9 +94,10 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
   background:
-    radial-gradient(circle at 15% 5%, rgba(53, 224, 161, 0.18), transparent 30rem),
-    radial-gradient(circle at 85% 10%, rgba(98, 181, 255, 0.18), transparent 28rem),
-    linear-gradient(180deg, #071525 0%, #06101d 46%, #030812 100%);
+    radial-gradient(circle at 50% -10%, rgba(91, 108, 255, 0.22), transparent 36rem),
+    radial-gradient(circle at 80% 0%, rgba(216, 173, 76, 0.12), transparent 24rem),
+    radial-gradient(circle at 5% 10%, rgba(127, 210, 255, 0.08), transparent 25rem),
+    linear-gradient(180deg, #071025 0%, #030714 52%, #01030a 100%);
   color: var(--foreground);
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
@@ -115,7 +116,7 @@ a {
 }
 
 ::selection {
-  background: rgba(53, 224, 161, 0.32);
+  background: rgba(91, 108, 255, 0.35);
 }
 
 .text-balance {
@@ -123,26 +124,63 @@ a {
 }
 
 .app-panel {
-  border: 1px solid rgba(173, 211, 255, 0.16);
+  border: 1px solid rgba(119, 147, 255, 0.18);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.03)),
-    rgba(8, 23, 38, 0.82);
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
+    linear-gradient(180deg, rgba(128, 151, 255, 0.12), rgba(255, 255, 255, 0.025)),
+    rgba(8, 16, 36, 0.86);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.44);
   backdrop-filter: blur(18px);
+}
+
+.premium-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(119, 147, 255, 0.18);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(128, 151, 255, 0.13), rgba(255, 255, 255, 0.025)),
+    rgba(8, 16, 36, 0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 24px 70px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(18px);
+}
+
+.premium-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(91, 108, 255, 0.16), transparent 18rem),
+    radial-gradient(circle at 95% 10%, rgba(216, 173, 76, 0.12), transparent 16rem);
+  opacity: 0.9;
+}
+
+.premium-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.stadium-card {
+  background:
+    linear-gradient(180deg, rgba(11, 20, 43, 0.45), rgba(11, 20, 43, 0.92)),
+    radial-gradient(circle at 45% 0%, rgba(255, 255, 255, 0.22), transparent 8rem),
+    linear-gradient(90deg, transparent 0 18%, rgba(91, 108, 255, 0.12) 18% 20%, transparent 20% 40%, rgba(216, 173, 76, 0.09) 40% 42%, transparent 42%);
 }
 
 .arena-line {
   background-image:
     linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
-  background-size: 44px 44px;
+  background-size: 52px 52px;
   mask-image: linear-gradient(to bottom, transparent, black 20%, black 74%, transparent);
 }
 
 .stadium-spotlight {
   background:
-    conic-gradient(from 115deg at 50% 0%, transparent, rgba(53, 224, 161, 0.22), transparent 32%),
-    conic-gradient(from 245deg at 50% 0%, transparent, rgba(98, 181, 255, 0.2), transparent 32%);
+    conic-gradient(from 115deg at 50% 0%, transparent, rgba(91, 108, 255, 0.25), transparent 32%),
+    conic-gradient(from 245deg at 50% 0%, transparent, rgba(216, 173, 76, 0.14), transparent 32%);
   filter: blur(12px);
 }
 

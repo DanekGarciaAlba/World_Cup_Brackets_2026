@@ -1,22 +1,35 @@
+import { Goal } from "lucide-react";
+import { EmptyStateCard } from "@/components/dashboard/EmptyStateCard";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { MatchPredictionCard } from "@/components/picks/MatchPredictionCard";
-import { Badge } from "@/components/ui/badge";
-import { fixtures } from "@/lib/demo-data";
+import { PremiumMatchCard } from "@/components/matches/PremiumMatchCard";
+import { getWorldCupDashboardData } from "@/lib/data/worldCupData";
 
-export default function PicksPage() {
+export const dynamic = "force-dynamic";
+
+export default async function PicksPage() {
+  const data = await getWorldCupDashboardData();
+
   return (
     <div>
       <PageHeader
         eyebrow="Fixture Picks"
-        title="Call the scores before kickoff."
-        description="Stage match score predictions, confidence levels, and points-only boosts. Each match card is built for thumb-first mobile use."
+        title="Match center predictions."
+        description="Make picks only against synced API-Football fixtures. If fixtures are missing, the app shows an admin sync state instead of invented matches."
         badge="Server kickoff locks"
       />
-      <div className="grid gap-4 xl:grid-cols-2">
-        {fixtures.map((fixture) => (
-          <MatchPredictionCard key={fixture.id} fixture={fixture} />
-        ))}
-      </div>
+      {data.nextMatches.length === 0 ? (
+        <EmptyStateCard
+          icon={Goal}
+          title="No fixtures synced yet"
+          message="Ask an admin to run sync. The production app will not display invented World Cup fixtures."
+        />
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {data.nextMatches.map((match) => (
+            <PremiumMatchCard key={match.id} match={match} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

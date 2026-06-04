@@ -1,20 +1,34 @@
+import { BiggestMoverCard } from "@/components/leaderboard/BiggestMoverCard";
+import { ExactScoreKingCard } from "@/components/leaderboard/ExactScoreKingCard";
 import { LeaderboardPodium } from "@/components/leaderboard/LeaderboardPodium";
-import { LeaderboardTable } from "@/components/leaderboard/LeaderboardTable";
+import { MiniLeagueLeaderboard } from "@/components/leaderboard/MiniLeagueLeaderboard";
+import { MobileLeaderboardCards } from "@/components/leaderboard/MobileLeaderboardCards";
+import { PremiumLeaderboardTable } from "@/components/leaderboard/PremiumLeaderboardTable";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { leaderboard } from "@/lib/demo-data";
+import { getWorldCupDashboardData } from "@/lib/data/worldCupData";
 
-export default function LeaderboardPage() {
+export const dynamic = "force-dynamic";
+
+export default async function LeaderboardPage() {
+  const data = await getWorldCupDashboardData();
+
   return (
     <div>
       <PageHeader
         eyebrow="Leaderboard"
-        title="Watch the table swing."
-        description="Podium, chart, desktop table, and mobile cards are ready for the scoring cache produced by the backend."
-        badge="Cache backed"
+        title="Standings with trophy energy."
+        description="Leaderboard rows come from scoring cache only. Empty cache means no invented people or points."
+        badge={`${data.leaderboard.length} rows`}
       />
       <div className="grid gap-5">
-        <LeaderboardPodium entries={leaderboard} />
-        <LeaderboardTable entries={leaderboard} />
+        {data.leaderboard.length > 0 ? <LeaderboardPodium entries={data.leaderboard} /> : null}
+        <div className="grid gap-4 lg:grid-cols-3">
+          <ExactScoreKingCard entries={data.leaderboard} />
+          <BiggestMoverCard />
+          <MiniLeagueLeaderboard />
+        </div>
+        <MobileLeaderboardCards entries={data.leaderboard} />
+        <PremiumLeaderboardTable entries={data.leaderboard} />
       </div>
     </div>
   );

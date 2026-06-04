@@ -1,9 +1,9 @@
-import { ArrowDown, ArrowUp, Minus, Trophy } from "lucide-react";
-import { AvatarPreview } from "@/components/avatar/AvatarPreview";
-import type { LeaderboardEntry } from "@/lib/demo-data";
+import { Trophy } from "lucide-react";
+import { AvatarPlaceholder } from "@/components/avatar/AvatarPlaceholder";
+import type { LeaderboardSummary } from "@/lib/data/worldCupData";
 
 type LeaderboardPodiumProps = {
-  entries: LeaderboardEntry[];
+  entries: LeaderboardSummary[];
 };
 
 export function LeaderboardPodium({ entries }: LeaderboardPodiumProps) {
@@ -12,33 +12,31 @@ export function LeaderboardPodium({ entries }: LeaderboardPodiumProps) {
   return (
     <section className="grid gap-3 lg:grid-cols-3">
       {top.map((entry, index) => (
-        <article key={entry.name} className={`app-panel rounded-lg p-4 ${index === 0 ? "lg:-mt-4" : ""}`}>
+        <article key={entry.userId} className={`premium-card p-5 ${index === 0 ? "lg:-mt-4" : ""}`}>
           <div className="mb-4 flex items-center justify-between">
             <span className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground">Rank {entry.rank}</span>
-            <RankMovement current={entry.rank} previous={entry.previousRank} />
+            <Trophy className="size-5 text-trophy-gold" />
           </div>
-          <AvatarPreview
-            className="mb-4"
-            config={{ skin_tone: entry.avatarTone, kit_primary_color: entry.kit, kit_secondary_color: "#f1f7ff" }}
-          />
+          <div className="mb-5 grid justify-items-center">
+            <AvatarPlaceholder
+              initials={entry.avatar?.initials}
+              kitPrimary={entry.avatar?.kitPrimary}
+              kitSecondary={entry.avatar?.kitSecondary}
+              kitNumber={entry.avatar?.kitNumber}
+              size="lg"
+            />
+          </div>
           <div className="flex items-end justify-between gap-3">
             <div>
-              <p className="text-lg font-semibold">{entry.name}</p>
-              <p className="text-sm text-muted-foreground">{entry.team}</p>
+              <p className="text-lg font-semibold">{entry.displayName}</p>
+              <p className="text-sm text-muted-foreground">{entry.department ?? "Player"}</p>
             </div>
             <div className="text-right">
-              <Trophy className="mb-1 ml-auto size-5 text-primary" />
-              <p className="text-2xl font-semibold">{entry.points}</p>
+              <p className="text-2xl font-semibold text-trophy-gold">{entry.totalPoints}</p>
             </div>
           </div>
         </article>
       ))}
     </section>
   );
-}
-
-function RankMovement({ current, previous }: { current: number; previous: number }) {
-  if (current < previous) return <span className="flex items-center gap-1 text-xs text-primary"><ArrowUp className="size-3" /> Up {previous - current}</span>;
-  if (current > previous) return <span className="flex items-center gap-1 text-xs text-destructive"><ArrowDown className="size-3" /> Down {current - previous}</span>;
-  return <span className="flex items-center gap-1 text-xs text-muted-foreground"><Minus className="size-3" /> Hold</span>;
 }

@@ -1,33 +1,53 @@
+import { Handshake, Flame, MessageCircle, Swords } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { ActivityFeed } from "@/components/dashboard/ActivityFeed";
-import { MiniLeagueActions, RivalCard } from "@/components/rivals/RivalCard";
+import { ActivityFeed } from "@/components/rivals/ActivityFeed";
+import { CelebrationEmoteButton } from "@/components/rivals/CelebrationEmoteButton";
+import { CreateLeagueDialog } from "@/components/rivals/CreateLeagueDialog";
+import { JoinLeagueDialog } from "@/components/rivals/JoinLeagueDialog";
+import { MiniLeagueCard } from "@/components/rivals/MiniLeagueCard";
+import { RivalCard } from "@/components/rivals/RivalCard";
+import { getWorldCupDashboardData } from "@/lib/data/worldCupData";
 
-export default function RivalsPage() {
+export const dynamic = "force-dynamic";
+
+export default async function RivalsPage() {
+  const data = await getWorldCupDashboardData();
+
   return (
     <div>
       <PageHeader
         eyebrow="Rivals"
-        title="Make mini-leagues feel alive."
-        description="Create private tables, join by code, compare point gaps, and send lightweight reactions after big scoring swings."
-        badge="Social tables added"
+        title="Private tables, clean emotes."
+        description="Mini-leagues and rival comparisons use real membership/activity data. Empty leagues stay empty."
+        badge={`${data.miniLeagueCount} leagues`}
       />
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_390px]">
         <div className="grid gap-4">
-          <div className="app-panel rounded-lg p-4">
+          <div className="premium-card p-5">
             <div className="mb-4">
               <p className="text-lg font-semibold">Mini-league controls</p>
               <p className="text-sm text-muted-foreground">Ready to connect to mini_leagues and mini_league_members.</p>
             </div>
-            <MiniLeagueActions />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <CreateLeagueDialog />
+              <JoinLeagueDialog />
+            </div>
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <RivalCard name="Maya Chen" delta={5} league="North Office Cup" />
-            <RivalCard name="Sam Patel" delta={-8} league="Design XI" />
-            <RivalCard name="Lena Brooks" delta={12} league="Sales City" />
-            <RivalCard name="Omar Hassan" delta={2} league="Support Town" />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <MiniLeagueCard count={data.miniLeagueCount} />
+            <RivalCard />
+          </div>
+          <div className="premium-card p-5">
+            <p className="mb-4 text-sm font-semibold">Predefined emotes</p>
+            <div className="grid gap-2 sm:grid-cols-4">
+              <CelebrationEmoteButton label="Nice pick" icon={Handshake} />
+              <CelebrationEmoteButton label="Close one" icon={Swords} />
+              <CelebrationEmoteButton label="Hot streak" icon={Flame} />
+              <CelebrationEmoteButton label="Comment" icon={MessageCircle} />
+            </div>
           </div>
         </div>
-        <ActivityFeed />
+        <ActivityFeed activity={data.activity} />
       </section>
     </div>
   );

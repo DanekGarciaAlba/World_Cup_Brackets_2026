@@ -9,6 +9,26 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        navy: {
+          950: "#030714",
+          900: "#071025",
+          850: "#0a1530",
+          800: "#0d1b3a",
+        },
+        electric: {
+          DEFAULT: "#5b6cff",
+          foreground: "#f7f8ff",
+        },
+        trophy: {
+          gold: "#d8ad4c",
+          muted: "#8f7541",
+        },
+        pitch: {
+          green: "#8bd86f",
+        },
+        live: {
+          red: "#ff4d5f",
+        },
         border: "var(--border)",
         input: "var(--input)",
         ring: "var(--ring)",
