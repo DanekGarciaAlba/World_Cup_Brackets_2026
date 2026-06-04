@@ -51,9 +51,25 @@ function push(rows: Row[], Service: string, Check: string, Status: Status, Notes
 
 function run(command: string, args: string[]) {
   try {
+    if (process.platform === "win32" && command.endsWith(".cmd")) {
+      return execFileSync("cmd.exe", ["/d", "/s", "/c", [command, ...args].join(" ")], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }).trim();
+    }
+
     return execFileSync(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   } catch {
     return "";
+  }
+}
+
+function hasPackageScript(name: string) {
+  try {
+    const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts?: Record<string, string> };
+    return Boolean(packageJson.scripts?.[name]);
+  } catch {
+    return false;
   }
 }
 
@@ -151,7 +167,8 @@ async function main() {
   await apiFootballCheck(env, rows);
   await supabaseCheck(env, rows);
 
-  push(rows, "Vercel", "CLI authenticated", run("vercel.cmd", ["whoami"]) ? "PASS" : "FAIL", run("vercel.cmd", ["whoami"]) || "Not logged in");
+  const vercelUser = run("vercel.cmd", ["whoami"]);
+  push(rows, "Vercel", "CLI authenticated", vercelUser ? "PASS" : "FAIL", vercelUser || "Not logged in");
   push(
     rows,
     "Vercel",
@@ -171,8 +188,8 @@ async function main() {
     cronRoute ? "Route checks Authorization bearer secret" : "Route missing",
   );
 
-  push(rows, "Build", "build script", run("npm.cmd", ["run", "--silent", "build", "--", "--help"]) ? "PASS" : "WARNING", "Run npm.cmd run build for full verification");
-  push(rows, "Tests", "test script", existsSync("tests/scoring.test.ts") ? "PASS" : "WARNING", existsSync("tests/scoring.test.ts") ? "Basic tests found" : "No tests found");
+  push(rows, "Build", "build script", hasPackageScript("build") ? "PASS" : "WARNING", "Run npm.cmd run build for full verification");
+  push(rows, "Tests", "test script", hasPackageScript("test") ? "PASS" : "WARNING", "Run npm.cmd run test for full verification");
 
   console.table(rows);
 
