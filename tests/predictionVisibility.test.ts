@@ -58,6 +58,34 @@ describe("public prediction visibility", () => {
     });
   });
 
+  it("uses the meaningful pick timestamp for revealed public profiles", () => {
+    const preview = buildPublicPredictionPreview(
+      [
+        {
+          id: 10,
+          kickoffAt: "2026-06-11T19:00:00Z",
+          homeTeam: baseTeam,
+          awayTeam,
+        },
+      ],
+      [
+        {
+          match_id: 10,
+          home_score: 2,
+          away_score: 1,
+          meaningful_updated_at: "2026-06-10T14:00:00Z",
+          updated_at: "2026-06-11T12:00:00Z",
+        },
+      ],
+      new Date("2026-06-11T19:00:00Z"),
+    );
+
+    expect(preview[0]).toMatchObject({
+      savedAt: "2026-06-10T14:00:00Z",
+      revealed: true,
+    });
+  });
+
   it("does not coerce missing stored scores into zeroes after reveal", () => {
     const preview = buildPublicPredictionPreview(
       [

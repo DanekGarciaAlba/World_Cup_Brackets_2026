@@ -36,6 +36,7 @@ type StoredPrediction = {
   match_id: number | string;
   home_score: number | string | null;
   away_score: number | string | null;
+  meaningful_updated_at?: string | null;
   updated_at: string | null;
 };
 
@@ -56,7 +57,12 @@ export function buildPublicPredictionPreview(matches: PublicPredictionMatch[], p
       {
         homeScore: toScore(prediction.home_score),
         awayScore: toScore(prediction.away_score),
-        savedAt: typeof prediction.updated_at === "string" ? prediction.updated_at : null,
+        savedAt:
+          typeof prediction.meaningful_updated_at === "string"
+            ? prediction.meaningful_updated_at
+            : typeof prediction.updated_at === "string"
+              ? prediction.updated_at
+              : null,
       },
     ]),
   );

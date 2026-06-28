@@ -11,6 +11,12 @@ const NEWS_READ_KEY = "wc-news-center-read:v1";
 
 const newsItems = [
   {
+    title: "Bracket guide updated",
+    body: "Groups, Top 8, and Bracket Logic now have separate guide tabs, including rolling Round of 32 locks.",
+    href: "/bracket",
+    label: "Read guide",
+  },
+  {
     title: "Bracket audits are now available",
     body: "Open your bracket to review group and Top 8 point audits without changing saved picks.",
     href: "/bracket",

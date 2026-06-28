@@ -4,17 +4,20 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getWorldCupDashboardData } from "@/lib/data/worldCupData";
 import { deriveWorldCupDeadlines } from "@/lib/scoring/deadlines";
+import { parseDefaultedBracketSegments } from "@/lib/bracket/defaultPredictionMetadata";
+import { assignKnockoutMatchNumbers } from "@/lib/bracket/tournamentPathRules";
 
 export const dynamic = "force-dynamic";
 
 const GROUP_LETTERS = "ABCDEFGHIJKL".split("");
 const FALLBACK_KNOCKOUT_OPEN_AT = "2026-06-28T00:00:00.000Z";
-const FALLBACK_KNOCKOUT_LOCK_AT = "2026-06-28T19:00:00.000Z";
+const FALLBACK_KNOCKOUT_LOCK_AT = "2026-07-04T01:30:00.000Z";
 
 type TournamentPredictionRow = {
   id: string | number;
   path: unknown;
   top8_submitted_at: string | null;
+  knockout_submitted_at?: string | null;
   updated_at: string | null;
 };
 
@@ -98,12 +101,13 @@ function deriveKnockoutWindow(matches: Array<{ kickoffAt?: string | null; groupN
     .filter((match) => match.kickoffAt)
     .sort((a, b) => new Date(a.kickoffAt ?? "").getTime() - new Date(b.kickoffAt ?? "").getTime());
   const lastGroupKickoff = [...sorted].reverse().find((match) => match.groupName)?.kickoffAt ?? null;
-  const firstRoundOf32Kickoff =
-    sorted.find((match) => {
+  const roundOf32Kickoffs =
+    sorted.filter((match) => {
       const text = `${match.round ?? ""} ${match.stage ?? ""}`.toLowerCase();
       return text.includes("round of 32") || text.includes("round_of_32");
-    })?.kickoffAt ?? null;
-  const knockoutLockAt = safeIso(firstRoundOf32Kickoff, FALLBACK_KNOCKOUT_LOCK_AT);
+    });
+  const lastRoundOf32Kickoff = roundOf32Kickoffs.at(-1)?.kickoffAt ?? null;
+  const knockoutLockAt = safeIso(lastRoundOf32Kickoff, FALLBACK_KNOCKOUT_LOCK_AT);
   const knockoutOpenAt = lastGroupKickoff ? plusHours(safeIso(lastGroupKickoff, FALLBACK_KNOCKOUT_OPEN_AT), 3) : FALLBACK_KNOCKOUT_OPEN_AT;
   return {
     knockoutOpenAt: openBeforeLock(safeIso(knockoutOpenAt, FALLBACK_KNOCKOUT_OPEN_AT), knockoutLockAt),
@@ -132,7 +136,50 @@ function parseSavedPath(value: unknown): SavedTournamentPath | null {
     top8GroupSavedAtByLetter: stringRecord(value.top8GroupSavedAtByLetter),
     thirdPlaceSlotTeamIds: numberRecord(value.thirdPlaceSlotTeamIds),
     winnersByMatch: numberRecord(value.winnersByMatch),
+    knockoutSavedAtByMatchNo: stringRecord(value.knockoutSavedAtByMatchNo),
   };
+}
+
+function knockoutWinnerTeamId(match: {
+  status?: string | null;
+  homeScore?: number | null;
+  awayScore?: number | null;
+  homeTeam?: { id: number } | null;
+  awayTeam?: { id: number } | null;
+}) {
+  if (match.status !== "finished" || match.homeScore === null || match.awayScore === null) return null;
+  if (!match.homeTeam?.id || !match.awayTeam?.id) return null;
+  const homeScore = Number(match.homeScore);
+  const awayScore = Number(match.awayScore);
+  if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) return null;
+  if (homeScore > awayScore) return Number(match.homeTeam.id);
+  if (awayScore > homeScore) return Number(match.awayTeam.id);
+  return null;
+}
+
+function knockoutMatchLocksByNo(matches: Array<{ kickoffAt?: string | null; round?: string | null; stage?: string | null }>, nowMs: number) {
+  return Object.fromEntries(
+    assignKnockoutMatchNumbers(matches)
+      .map(({ matchNo, match }) => {
+        const kickoffAt = match.kickoffAt ?? null;
+        const kickoffMs = kickoffAt ? new Date(kickoffAt).getTime() : Number.NaN;
+        return [
+          String(matchNo),
+          {
+            kickoffAt,
+            locked: Number.isFinite(kickoffMs) ? nowMs >= kickoffMs : false,
+          },
+        ] as const;
+      }),
+  );
+}
+
+function actualKnockoutWinnersByNo(matches: Array<{ kickoffAt?: string | null; round?: string | null; stage?: string | null; status?: string | null; homeScore?: number | null; awayScore?: number | null; homeTeam?: { id: number } | null; awayTeam?: { id: number } | null }>) {
+  return Object.fromEntries(
+    assignKnockoutMatchNumbers(matches)
+      .map(({ matchNo, match }) => [String(matchNo), knockoutWinnerTeamId(match)] as const)
+      .filter(([, winnerTeamId]) => Number.isFinite(Number(winnerTeamId)) && Number(winnerTeamId) > 0),
+  );
 }
 
 function groupLetter(groupName: string | null | undefined) {
@@ -182,7 +229,7 @@ async function getOwnBracketAudit(userId?: string | null): Promise<OwnBracketAud
   const supabase = createAdminClient();
   const [{ data: groupRows }, { data: tournamentRow }, { data: standings }] = await Promise.all([
     supabase.from("group_predictions").select("id,group_name").eq("user_id", userId),
-    supabase.from("tournament_predictions").select("id").eq("user_id", userId).maybeSingle<Pick<TournamentPredictionRow, "id">>(),
+    supabase.from("tournament_predictions").select("id,path").eq("user_id", userId).maybeSingle<Pick<TournamentPredictionRow, "id" | "path">>(),
     supabase
       .from("standings")
       .select("group_name,team_id,rank,points,goal_difference,goals_for")
@@ -193,6 +240,7 @@ async function getOwnBracketAudit(userId?: string | null): Promise<OwnBracketAud
   const groupPredictionRows = (groupRows ?? []) as GroupPredictionAuditRow[];
   const groupPredictionIds = groupPredictionRows.map((row) => String(row.id));
   const tournamentPredictionId = tournamentRow?.id ? String(tournamentRow.id) : null;
+  const defaultedSegments = parseDefaultedBracketSegments(tournamentRow?.path);
   const [{ data: groupScores }, { data: top8Scores }] = await Promise.all([
     groupPredictionIds.length > 0
       ? supabase
@@ -234,6 +282,7 @@ async function getOwnBracketAudit(userId?: string | null): Promise<OwnBracketAud
           },
           reasons: reasons(metadata.reasons),
           scoredAt: typeof score?.scored_at === "string" ? score.scored_at : typeof score?.calculated_at === "string" ? score.calculated_at : null,
+          source: defaultedSegments?.groups?.[letter] ?? null,
         },
       ];
     }),
@@ -252,9 +301,11 @@ async function getOwnBracketAudit(userId?: string | null): Promise<OwnBracketAud
       timingMultiplier: top8Score ? numberOrNull(top8Metadata.timingMultiplier) : null,
       correctTeams: top8Score ? numberOrNull(top8Metadata.correctTeams) : null,
       perfectBonus: top8Score ? numberOrNull(top8Metadata.perfectBonus) : null,
+      pickDetails: top8Score ? top8PickDetails(top8Metadata.pickDetails) : [],
       actualTeamIds: top8ActualTeamIds,
       reasons: reasons(top8Metadata.reasons),
       scoredAt: typeof top8Score?.scored_at === "string" ? top8Score.scored_at : typeof top8Score?.calculated_at === "string" ? top8Score.calculated_at : null,
+      sourcesByGroup: defaultedSegments?.top8?.picksByGroup ?? {},
     },
   };
 }
@@ -311,6 +362,8 @@ export default async function BracketPage() {
       top8SavedAt={saved.top8SubmittedAt}
       initialGroupSavedAtByLetter={saved.groupSavedAtByLetter}
       audit={audit}
+      knockoutMatchLocksByNo={knockoutMatchLocksByNo(worldCupData.matches, now)}
+      actualKnockoutWinnersByNo={actualKnockoutWinnersByNo(worldCupData.matches)}
     />
   );
 }
@@ -331,6 +384,7 @@ function actualGroupTeamIds(standings: StandingAuditRow[]) {
 
 function actualThirdPlaceQualifierIds(standings: StandingAuditRow[]) {
   const thirdPlaceRows = standings
+    .filter((standing) => typeof standing.group_name === "string" && /^Group [A-L]$/.test(standing.group_name))
     .map((standing) => ({
       teamId: numberOrNull(standing.team_id),
       rank: numberOrNull(standing.rank),
@@ -366,6 +420,27 @@ function reasons(value: unknown) {
           points: typeof itemRecord.points === "number" || typeof itemRecord.points === "string" ? itemRecord.points : undefined,
         };
       })
+    : [];
+}
+
+function top8PickDetails(value: unknown) {
+  return Array.isArray(value)
+    ? value
+        .map((item) => {
+          const itemRecord = record(item);
+          const teamId = numberOrNull(itemRecord.teamId);
+          if (teamId === null) return null;
+          return {
+            teamId,
+            correct: itemRecord.correct === true ? true : itemRecord.correct === false ? false : null,
+            savedAt: typeof itemRecord.savedAt === "string" ? itemRecord.savedAt : null,
+            points: numberOrNull(itemRecord.points) ?? 0,
+            pointsPerCorrectTeam: numberOrNull(itemRecord.pointsPerCorrectTeam) ?? 0,
+            timingBucket: typeof itemRecord.timingBucket === "string" ? itemRecord.timingBucket : null,
+            eligible: itemRecord.eligible === true ? true : itemRecord.eligible === false ? false : null,
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => Boolean(item))
     : [];
 }
 

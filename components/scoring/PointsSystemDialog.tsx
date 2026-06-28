@@ -142,21 +142,30 @@ const groupTimelineRows = [
 ] as const;
 
 const bracketProgressionRows = [
-  ["Team reaches Round of 16", "3 each", "Correctly predicted a Round of 32 survivor."],
-  ["Team reaches quarter-finals", "5 each", "Correctly predicted a quarter-finalist."],
-  ["Team reaches semi-finals", "8 each", "Correctly predicted a semi-finalist."],
-  ["Team reaches final", "12 each", "Correctly predicted a finalist."],
-  ["Champion", "25", "Correct tournament winner."],
-  ["Third-place winner", "8", "Correct third-place match winner."],
+  ["Round of 32 winner", "+4 each", "That exact R32 match must be saved before its kickoff."],
+  ["Round of 16 winner", "+8 each", "Full value before either feeder R32 match is known."],
+  ["Quarter-final winner", "+14 each", "Value drops only as that branch becomes known."],
+  ["Semi-final winner", "+25 each", "Hard early picks stay heavily rewarded."],
+  ["Champion", "+60", "Correct tournament winner."],
+  ["Third-place winner", "+26", "Correct third-place match winner."],
+  ["Perfect R32 bonus", "+30", "Only for all 16 R32 winners saved before kickoff."],
+] as const;
+
+const bracketExamples = [
+  ["R16 slot before both feeder games", "8 pts", "4 possible teams are still alive."],
+  ["R16 slot after one feeder game starts", "6 pts", "3 possible teams remain in that branch."],
+  ["R16 slot after both feeder games start", "4 pts", "The matchup is now close to a direct 50/50."],
+  ["Champion before any R32 kickoff", "60 pts", "Full blind champion value."],
+  ["Champion after half the R32 games start", "45 pts", "About 24 of the original 32 candidates remain unknown."],
 ] as const;
 
 const top8TimingRows = [
-  ["Thu Jun 18, 10:00 AM ET", "1.40x", "Top 8 opens."],
-  ["Sat Jun 20, 10:00 AM ET", "~1.20x", "Still rewarded for early confidence."],
-  ["Mon Jun 22, 10:00 AM ET", "~1.05x", "More group results are known."],
-  ["Tue Jun 23, 10:00 AM ET", "1.00x", "Full base value floor."],
-  ["Wed Jun 24 before 3:00 PM ET", "1.00x", "Final hours before lock."],
-  ["Wed Jun 24, 3:00 PM ET", "0x", "Global Top 8 scoring lock."],
+  ["Thu Jun 18, 10:00 AM ET", "+9", "Top 8 opens."],
+  ["Sat Jun 20, 10:00 AM ET", "+8", "Still rewarded for early confidence."],
+  ["Mon Jun 22, 10:00 AM ET", "+6", "More group results are known."],
+  ["Tue Jun 23, 10:00 AM ET", "+4", "Late, but still meaningful."],
+  ["Wed Jun 24 before 3:00 PM ET", "+3", "Final hours before lock."],
+  ["Wed Jun 24, 3:00 PM ET", "0", "Global Top 8 scoring lock."],
 ] as const;
 
 export function PointsSystemDialog({ compact = false }: { compact?: boolean }) {
@@ -330,22 +339,29 @@ export function BracketPointsGuideDialog({ compact = false }: { compact?: boolea
           icon={<Trophy className="size-7 text-trophy-gold" />}
           descriptionId="bracket-points-guide-description"
         >
-          <Tabs defaultValue="logic" className="min-h-0">
-            <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-xl border border-white/10 bg-white/[0.045] p-1">
-              <TabsTrigger value="logic" className="min-h-11 rounded-lg text-sm font-black data-active:bg-electric data-active:text-white">
-                Bracket Logic
+          <Tabs defaultValue="groups" className="min-h-0">
+            <TabsList className="grid h-auto w-full grid-cols-3 gap-2 rounded-xl border border-white/10 bg-white/[0.045] p-1">
+              <TabsTrigger value="groups" className="min-h-11 rounded-lg text-xs font-black data-active:bg-electric data-active:text-white sm:text-sm">
+                Groups
               </TabsTrigger>
-              <TabsTrigger value="drops" className="min-h-11 rounded-lg text-sm font-black data-active:bg-electric data-active:text-white">
-                Group Drops
+              <TabsTrigger value="top8" className="min-h-11 rounded-lg text-xs font-black data-active:bg-electric data-active:text-white sm:text-sm">
+                Top 8
+              </TabsTrigger>
+              <TabsTrigger value="logic" className="min-h-11 rounded-lg text-xs font-black data-active:bg-electric data-active:text-white sm:text-sm">
+                Bracket Logic
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="logic" className="mt-4 min-h-0">
-              <BracketLogicTab />
+            <TabsContent value="groups" className="mt-4 min-h-0">
+              <GroupDropsTab />
             </TabsContent>
 
-            <TabsContent value="drops" className="mt-4 min-h-0">
-              <GroupDropsTab />
+            <TabsContent value="top8" className="mt-4 min-h-0">
+              <Top8RulesTab />
+            </TabsContent>
+
+            <TabsContent value="logic" className="mt-4 min-h-0">
+              <BracketLogicTab />
             </TabsContent>
           </Tabs>
         </GuideFrame>
@@ -359,36 +375,39 @@ function BracketLogicTab() {
     <div className="grid gap-4">
       <section className="grid gap-3 lg:grid-cols-3">
         <GuideMetric
-          icon={<CalendarClock className="size-5" />}
-          label="Groups"
-          value="6 / 4 / 3 max per group"
-          detail="Rank all four teams. Correct 1st, 2nd, and 3rd score; values drop as that group starts."
+          icon={<Trophy className="size-5" />}
+          label="Full blind max"
+          value="350 pts"
+          detail="Perfect bracket path from R32 through champion, including the perfect R32 bonus."
+        />
+        <GuideMetric
+          icon={<Lock className="size-5" />}
+          label="R32 locks"
+          value="one match at a time"
+          detail="Each Round of 32 match locks at its own kickoff. Other future R32 matches keep full value."
         />
         <GuideMetric
           icon={<ShieldCheck className="size-5" />}
-          label="Top 8 thirds"
-          value="+4 each, +8 perfect"
-          detail="Pick exactly eight direct teams. They score only if they finish third and qualify for the Round of 32."
-        />
-        <GuideMetric
-          icon={<Trophy className="size-5" />}
-          label="Knockout path"
-          value="team progression"
-          detail="Pick winners from Round of 32 through the final before the knockout lock."
+          label="Late fairness"
+          value="branch adjusted"
+          detail="Later-round values drop only when teams in that exact branch become known."
         />
       </section>
 
       <section className="rounded-2xl border border-white/10 bg-white/[0.045] p-4">
-        <p className="wc-label">Step-by-step bracket flow</p>
+        <p className="wc-label">Knockout save flow</p>
         <div className="mt-3 grid gap-3">
-          <GuideStep number="1" title="Rank Groups A-L">
-            First and second place qualify automatically. Third place becomes a candidate for the Top 8 step. Fourth completes the group order but does not directly score group-position points.
+          <GuideStep number="1" title="Build and save the full path">
+            Pick Match 73 through Match 104. The final bracket save is required before the app can score changed knockout picks.
           </GuideStep>
-          <GuideStep number="2" title="Choose the Top 8 third-place teams">
-            After the group-ranking window closes, select exactly eight direct teams, with at most one team per group. Each correct best-third qualifier is worth 4 points, with an 8-point perfect bonus for 8 out of 8. Scored Top 8 saves lock globally on Jun 24 at 3:00 PM ET.
+          <GuideStep number="2" title="R32 locks individually">
+            When a Round of 32 match kicks off, that exact pick locks. If it was not saved before kickoff, that R32 slot scores 0.
           </GuideStep>
-          <GuideStep number="3" title="Complete the knockout bracket">
-            Pick every winner from Match 73 through Match 104. Official knockout fixtures stay provider-pending until they sync, so the app uses the FIFA 2026 projected structure first.
+          <GuideStep number="3" title="Finished R32 winners can move forward">
+            If a user missed an R32 pick, the real winner can still become a later-round candidate after the result, but later points are reduced because more information is known.
+          </GuideStep>
+          <GuideStep number="4" title="Final R32 kickoff closes the bracket">
+            After the final Round of 32 match kicks off, no new knockout bracket saves score. Existing valid timestamps remain.
           </GuideStep>
         </div>
       </section>
@@ -401,33 +420,65 @@ function BracketLogicTab() {
           ))}
         </div>
         <p className="mt-3 text-sm font-semibold leading-6 text-muted-foreground">
-          Knockout bracket scoring has no early-bird bonus. It is on time before the lock, or it is not eligible.
+          Later-round points use: floor(full value x possible teams still unknown / original possible teams). This rewards early work without letting late information become free points.
         </p>
       </section>
 
+      <section className="rounded-2xl border border-electric/20 bg-electric/[0.055] p-4">
+        <p className="wc-label text-electric">Simple examples</p>
+        <div className="mt-3 grid gap-2 lg:grid-cols-2">
+          {bracketExamples.map(([label, value, detail]) => (
+            <GuideRow key={label} label={label} value={value} detail={detail} tone="blue" />
+          ))}
+        </div>
+      </section>
+
       <section className="rounded-2xl border border-pitch-green/25 bg-pitch-green/[0.055] p-4">
-        <p className="wc-label text-pitch-green">Top 8 direct-pick timing</p>
-        <h3 className="mt-1 text-2xl font-black text-foreground">Earlier saves keep a bonus, late saves keep base value.</h3>
+        <p className="wc-label text-electric">Save behavior</p>
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          <GuideMetric icon={<Save className="size-5" />} label="Save groups" value="not automatic" detail="Moving teams changes the draft until Save groups succeeds." />
+          <GuideMetric icon={<Save className="size-5" />} label="Save Top 8" value="not automatic" detail="Selecting Top 8 teams changes the draft until Save Top 8 succeeds." />
+          <GuideMetric icon={<Save className="size-5" />} label="Save bracket" value="required" detail="Clicking winners changes the draft until Save final bracket succeeds." />
+        </div>
+        <p className="mt-3 text-sm font-semibold leading-6 text-muted-foreground">
+          Locked segments preserve older valid saved picks. Public finalized paths stay hidden until the bracket reveal deadline.
+        </p>
+      </section>
+    </div>
+  );
+}
+
+function Top8RulesTab() {
+  return (
+    <div className="grid gap-4">
+      <section className="grid gap-3 lg:grid-cols-3">
+        <GuideMetric icon={<ShieldCheck className="size-5" />} label="Correct team" value="+9 to +3 each" detail="Each correct selected team uses that team's own saved timestamp." />
+        <GuideMetric icon={<Trophy className="size-5" />} label="Perfect bonus" value="+10" detail="Only for 8 out of 8 correct Top 8 teams." />
+        <GuideMetric icon={<Lock className="size-5" />} label="Global lock" value="Jun 24, 3 PM ET" detail="At or after lock, new Top 8 saves are ineligible." />
+      </section>
+
+      <section className="rounded-2xl border border-pitch-green/25 bg-pitch-green/[0.055] p-4">
+        <p className="wc-label text-pitch-green">Top 8 point windows</p>
+        <h3 className="mt-1 text-2xl font-black text-foreground">Earlier saves are worth more per correct team.</h3>
         <p className="mt-2 text-sm font-semibold leading-6 text-muted-foreground">
-          Top 8 opens Thu Jun 18 at 10:00 AM ET and locks globally Wed Jun 24 at 3:00 PM ET. The multiplier steps down from 1.40x toward a 1.00x floor before lock. There is no scored per-group grace after the global lock.
+          Pick exactly eight third-place teams, with at most one from each group. They score only if they finish third and qualify for the Round of 32.
         </p>
         <div className="mt-3 grid gap-2 lg:grid-cols-2">
           {top8TimingRows.map(([label, value, detail]) => (
             <GuideRow key={label} label={label} value={value} detail={detail} tone="green" />
           ))}
         </div>
+        <p className="mt-3 rounded-lg border border-trophy-gold/20 bg-trophy-gold/10 px-3 py-2 text-sm font-black text-trophy-gold">
+          Perfect 8/8 adds +10.
+        </p>
       </section>
 
-      <section className="rounded-2xl border border-electric/20 bg-electric/[0.055] p-4">
-        <p className="wc-label text-electric">Save behavior</p>
-        <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <GuideMetric icon={<Save className="size-5" />} label="Save groups" value="not automatic" detail="Moving teams changes the draft until Save groups succeeds." />
-          <GuideMetric icon={<Save className="size-5" />} label="Save Top 8" value="not automatic" detail="Selecting Top 8 teams changes the draft until Save Top 8 succeeds." />
-          <GuideMetric icon={<Save className="size-5" />} label="Save knockout" value="not automatic" detail="Clicking winners changes the draft until Save knockout succeeds." />
+      <section className="rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+        <p className="wc-label">Save behavior</p>
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <GuideMetric icon={<Save className="size-5" />} label="Per-group timestamp" value="shown beside pick" detail="Saving Group A Top 8 stamps only that group. Other saved groups keep their original time." />
+          <GuideMetric icon={<CalendarClock className="size-5" />} label="Audit later" value="team by team" detail="The audit shows saved time, correctness, and points beside every selected country." />
         </div>
-        <p className="mt-3 text-sm font-semibold leading-6 text-muted-foreground">
-          Locked segments preserve older valid saved picks. Public finalized paths stay hidden until the bracket reveal deadline.
-        </p>
       </section>
     </div>
   );

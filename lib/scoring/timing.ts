@@ -31,13 +31,28 @@ function hoursBefore(submittedAt?: string | Date | null, deadlineAt?: string | D
 }
 
 export const TOP8_TIMING_OPEN_AT = "2026-06-18T14:00:00.000Z";
-export const TOP8_MAX_MULTIPLIER_BP = 140;
-export const TOP8_MIN_MULTIPLIER_BP = 100;
-const TOP8_TIMING_ANCHORS = [
-  { at: TOP8_TIMING_OPEN_AT, multiplierBP: 140, bucket: "top8_open" },
-  { at: "2026-06-20T14:00:00.000Z", multiplierBP: 120, bucket: "top8_jun20" },
-  { at: "2026-06-22T14:00:00.000Z", multiplierBP: 105, bucket: "top8_jun22" },
-  { at: "2026-06-23T14:00:00.000Z", multiplierBP: 100, bucket: "top8_floor" },
+export const TOP8_PERFECT_BONUS_POINTS = 10;
+
+export type Top8PointWindow = {
+  at: string;
+  bucket: string;
+  label: string;
+  detail: string;
+  pointsPerCorrectTeam: number;
+};
+
+export type Top8PointTimingResult = TimingResult & {
+  pointsPerCorrectTeam: number;
+  windowLabel: string | null;
+  windowDetail: string | null;
+};
+
+export const TOP8_POINT_WINDOWS = [
+  { at: TOP8_TIMING_OPEN_AT, bucket: "top8_open", label: "Open", detail: "Jun 18, 10:00 AM ET", pointsPerCorrectTeam: 9 },
+  { at: "2026-06-20T14:00:00.000Z", bucket: "top8_jun20", label: "Jun 20", detail: "10:00 AM ET", pointsPerCorrectTeam: 8 },
+  { at: "2026-06-22T14:00:00.000Z", bucket: "top8_jun22", label: "Jun 22", detail: "10:00 AM ET", pointsPerCorrectTeam: 6 },
+  { at: "2026-06-23T14:00:00.000Z", bucket: "top8_jun23", label: "Jun 23", detail: "10:00 AM ET", pointsPerCorrectTeam: 4 },
+  { at: "2026-06-24T04:00:00.000Z", bucket: "top8_jun24", label: "Jun 24", detail: "Before 3:00 PM ET", pointsPerCorrectTeam: 3 },
 ] as const;
 
 export function resolveDailyTiming(submittedAt?: string | Date | null, kickoffAt?: string | Date | null): TimingResult {
@@ -90,33 +105,45 @@ export function resolveBracketTiming(submittedAt?: string | Date | null, deadlin
   return timing("0_to_2h", 75, true, hours);
 }
 
-export function resolveTop8Timing(submittedAt?: string | Date | null, lockAt?: string | Date | null): TimingResult {
+function top8PointTiming(
+  bucket: string,
+  pointsPerCorrectTeam: number,
+  eligible: boolean,
+  hoursBeforeDeadline: number | null,
+  windowLabel: string | null,
+  windowDetail: string | null,
+): Top8PointTimingResult {
+  return {
+    ...timing(bucket, eligible ? 100 : 0, eligible, hoursBeforeDeadline),
+    pointsPerCorrectTeam,
+    windowLabel,
+    windowDetail,
+  };
+}
+
+export function resolveTop8PickPoints(submittedAt?: string | Date | null, lockAt?: string | Date | null): Top8PointTimingResult {
   const hours = hoursBefore(submittedAt, lockAt);
-  if (hours === null || !submittedAt || !lockAt) return timing("pending_deadline", 0, false, null);
+  if (hours === null || !submittedAt || !lockAt) return top8PointTiming("pending_deadline", 0, false, null, null, null);
   const submitted = new Date(submittedAt).getTime();
   const lock = new Date(lockAt).getTime();
-  if (!Number.isFinite(submitted) || !Number.isFinite(lock) || submitted >= lock) return timing("after_deadline", 0, false, hours);
+  if (!Number.isFinite(submitted) || !Number.isFinite(lock) || submitted >= lock) return top8PointTiming("after_deadline", 0, false, hours, "Lock", "Jun 24, 3:00 PM ET");
 
-  const anchors = TOP8_TIMING_ANCHORS.map((anchor) => ({ ...anchor, time: Date.parse(anchor.at) }))
-    .filter((anchor) => Number.isFinite(anchor.time) && anchor.time < lock)
+  const windows = TOP8_POINT_WINDOWS.map((window) => ({ ...window, time: Date.parse(window.at) }))
+    .filter((window) => Number.isFinite(window.time) && window.time < lock)
     .sort((a, b) => a.time - b.time);
-  if (anchors.length === 0) return timing("top8_on_time", TOP8_MIN_MULTIPLIER_BP, true, hours);
+  if (windows.length === 0) return top8PointTiming("top8_on_time", 3, true, hours, null, null);
 
-  if (submitted <= anchors[0].time) return timing(anchors[0].bucket, anchors[0].multiplierBP, true, hours);
-
-  for (let index = 0; index < anchors.length - 1; index += 1) {
-    const current = anchors[index];
-    const next = anchors[index + 1];
-    if (submitted <= next.time) {
-      const span = next.time - current.time;
-      const elapsed = submitted - current.time;
-      const ratio = span > 0 ? elapsed / span : 1;
-      const multiplierBP = Math.round(current.multiplierBP + (next.multiplierBP - current.multiplierBP) * ratio);
-      return timing("top8_decay", multiplierBP, true, hours);
-    }
+  let active = windows[0];
+  for (const window of windows) {
+    if (submitted >= window.time) active = window;
   }
 
-  return timing("top8_floor", TOP8_MIN_MULTIPLIER_BP, true, hours);
+  return top8PointTiming(active.bucket, active.pointsPerCorrectTeam, true, hours, active.label, active.detail);
+}
+
+export function resolveTop8Timing(submittedAt?: string | Date | null, lockAt?: string | Date | null): TimingResult {
+  const top8 = resolveTop8PickPoints(submittedAt, lockAt);
+  return timing(top8.bucket, top8.eligible ? 100 : 0, top8.eligible, top8.hoursBeforeDeadline);
 }
 
 export function resolveKnockoutTiming(submittedAt?: string | Date | null, lockAt?: string | Date | null, openAt?: string | Date | null): TimingResult {

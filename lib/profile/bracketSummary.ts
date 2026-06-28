@@ -15,6 +15,8 @@ export type ProfileBracketPath = {
   thirdPlaceWinner: number | null;
   groupRankings: Record<string, number[]>;
   thirdPlaceGroups: string[];
+  top8TeamIds: number[];
+  top8GroupSavedAtByLetter: Record<string, string | null>;
   winnersByMatch: Record<string, number | null>;
 };
 
@@ -48,6 +50,13 @@ function numberRecord(value: unknown) {
   );
 }
 
+function nullableStringRecord(value: unknown) {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key.replace(/^Group\s+/i, ""), typeof item === "string" && item ? item : null]),
+  );
+}
+
 export function parseProfileBracketPath(value: unknown): ProfileBracketPath | null {
   if (!isRecord(value)) return null;
 
@@ -65,6 +74,8 @@ export function parseProfileBracketPath(value: unknown): ProfileBracketPath | nu
     thirdPlaceWinner: Number(value.thirdPlaceWinner) || null,
     groupRankings,
     thirdPlaceGroups: Array.isArray(value.thirdPlaceGroups) ? value.thirdPlaceGroups.map((group) => String(group).replace(/^Group\s+/i, "")) : [],
+    top8TeamIds: numberArray(value.top8TeamIds),
+    top8GroupSavedAtByLetter: nullableStringRecord(value.top8GroupSavedAtByLetter),
     winnersByMatch: numberRecord(value.winnersByMatch),
   };
 }
@@ -82,9 +93,12 @@ export function buildProfileBracketSummary(
 
   const teamsById = new Map(teams.map((team) => [team.id, team]));
   const pickedMatches = Object.values(path.winnersByMatch).filter((teamId) => Number(teamId) > 0).length;
-  const topThirds = path.thirdPlaceGroups
-    .map((group) => teamsById.get(path.groupRankings[group]?.[2] ?? 0) ?? null)
-    .filter((team): team is ProfileBracketTeam => Boolean(team));
+  const topThirds =
+    path.top8TeamIds.length > 0
+      ? teamsFromIds(path.top8TeamIds, teamsById)
+      : path.thirdPlaceGroups
+          .map((group) => teamsById.get(path.groupRankings[group]?.[2] ?? 0) ?? null)
+          .filter((team): team is ProfileBracketTeam => Boolean(team));
 
   return {
     savedAt,

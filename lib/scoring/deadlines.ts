@@ -2,7 +2,9 @@ export const FALLBACK_TOURNAMENT_START_AT = "2026-06-11T19:00:00.000Z";
 export const FALLBACK_GROUP_CUTOFF_AT = "2026-06-18T14:00:00.000Z";
 export const FALLBACK_TOP8_OPEN_AT = FALLBACK_GROUP_CUTOFF_AT;
 export const FALLBACK_TOP8_LOCK_AT = "2026-06-24T19:00:00.000Z";
-export const FALLBACK_KNOCKOUT_LOCK_AT = "2026-06-28T19:00:00.000Z";
+export const FALLBACK_KNOCKOUT_OPEN_AT = "2026-06-28T00:00:00.000Z";
+export const FALLBACK_KNOCKOUT_LOCK_AT = "2026-07-04T01:30:00.000Z";
+const KNOCKOUT_OPEN_BUFFER_HOURS = 3;
 
 export type DeadlineMatch = {
   kickoff_at?: string | null;
@@ -22,6 +24,7 @@ export type WorldCupDeadlines = {
   groupCutoffAt: string;
   top8OpenAt: string;
   top8LockAt: string;
+  knockoutOpenAt: string;
   knockoutLockAt: string;
 };
 
@@ -54,6 +57,17 @@ function minusHours(value: string, hours: number) {
   return new Date(new Date(value).getTime() - hours * 36e5).toISOString();
 }
 
+function plusHours(value: string, hours: number) {
+  return new Date(new Date(value).getTime() + hours * 36e5).toISOString();
+}
+
+function openBeforeLock(openAt: string, lockAt: string) {
+  const open = new Date(openAt).getTime();
+  const lock = new Date(lockAt).getTime();
+  if (Number.isFinite(open) && Number.isFinite(lock) && open < lock) return new Date(open).toISOString();
+  return minusHours(lockAt, 19);
+}
+
 export function deriveWorldCupDeadlines(matches: DeadlineMatch[] = []): WorldCupDeadlines {
   const sorted = [...matches]
     .filter((match) => kickoffOf(match))
@@ -63,30 +77,33 @@ export function deriveWorldCupDeadlines(matches: DeadlineMatch[] = []): WorldCup
   const groupMatches = sorted.filter((match) => groupOf(match));
   const appearancesByTeam = new Map<number, number>();
   let firstMatchday2At: string | null = null;
-  let firstMatchday3At: string | null = null;
 
   for (const match of groupMatches) {
     const kickoff = kickoffOf(match);
     const ids = teamIds(match);
     const previousMax = Math.max(...ids.map((teamId) => appearancesByTeam.get(teamId) ?? 0), 0);
     if (!firstMatchday2At && previousMax >= 1 && kickoff) firstMatchday2At = kickoff;
-    if (!firstMatchday3At && previousMax >= 2 && kickoff) firstMatchday3At = kickoff;
     for (const teamId of ids) {
       appearancesByTeam.set(teamId, (appearancesByTeam.get(teamId) ?? 0) + 1);
     }
   }
 
-  const firstRoundOf32 = sorted.find(isKnockoutRound);
-  const firstRoundOf32At = firstRoundOf32 ? kickoffOf(firstRoundOf32) : null;
+  const roundOf32Matches = sorted.filter(isKnockoutRound);
+  const lastRoundOf32At = roundOf32Matches.at(-1) ? kickoffOf(roundOf32Matches.at(-1)!) : null;
+  const lastGroupMatch = groupMatches.at(-1);
+  const lastGroupMatchAt = lastGroupMatch ? kickoffOf(lastGroupMatch) : null;
   const groupCutoffAt = firstMatchday2At ? minusHours(safeIso(firstMatchday2At, FALLBACK_GROUP_CUTOFF_AT), 2) : FALLBACK_GROUP_CUTOFF_AT;
-  const top8LockAt = safeIso(firstMatchday3At, FALLBACK_TOP8_LOCK_AT);
+  const top8LockAt = FALLBACK_TOP8_LOCK_AT;
+  const knockoutLockAt = safeIso(lastRoundOf32At, FALLBACK_KNOCKOUT_LOCK_AT);
+  const knockoutOpenAt = lastGroupMatchAt ? plusHours(safeIso(lastGroupMatchAt, FALLBACK_KNOCKOUT_OPEN_AT), KNOCKOUT_OPEN_BUFFER_HOURS) : FALLBACK_KNOCKOUT_OPEN_AT;
 
   return {
     tournamentStartAt,
     groupCutoffAt,
     top8OpenAt: groupCutoffAt,
     top8LockAt,
-    knockoutLockAt: safeIso(firstRoundOf32At, FALLBACK_KNOCKOUT_LOCK_AT),
+    knockoutOpenAt: openBeforeLock(safeIso(knockoutOpenAt, FALLBACK_KNOCKOUT_OPEN_AT), knockoutLockAt),
+    knockoutLockAt,
   };
 }
 

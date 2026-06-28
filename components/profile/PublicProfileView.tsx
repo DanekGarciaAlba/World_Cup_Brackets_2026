@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { FullPublicProfileCard } from "@/components/profile/FullPublicProfileCard";
 import { ProfileKitCard } from "@/components/profile/ProfileKitCard";
+import { PublicBracketAuditCard, type PublicBracketAudit } from "@/components/profile/PublicBracketAuditCard";
 import { PublicPredictionTimeline } from "@/components/profile/PublicPredictionTimeline";
 import { Button } from "@/components/ui/button";
 import { findEmoteById, getDefaultEmoteForSkin } from "@/lib/emotes/emoteCatalog";
@@ -44,9 +45,11 @@ type PublicProfileViewProps = {
     correctOutcomes: number;
   } | null;
   bracketSummary: ProfileBracketSummary | null;
+  bracketAudit?: PublicBracketAudit | null;
   bracketRevealAt?: string | null;
   bracketHiddenUntilReveal?: boolean;
   predictionPreview?: PublicPredictionPreview[];
+  profileUserId?: string;
   headerEyebrow?: string;
   backHref?: string;
   backLabel?: string;
@@ -70,9 +73,11 @@ export function PublicProfileView({
   mascot,
   stats,
   bracketSummary,
+  bracketAudit,
   bracketRevealAt,
   bracketHiddenUntilReveal = false,
   predictionPreview = [],
+  profileUserId,
   headerEyebrow = "Public player card",
   backHref = "/leaderboard",
   backLabel = "Leaderboard",
@@ -91,8 +96,8 @@ export function PublicProfileView({
   const clubSubLabel = profile.favoriteCountry ?? kit.countryName;
 
   return (
-    <div className="public-profile-view-shell mx-auto grid w-full max-w-[1540px] gap-3 pb-4 text-white xl:grid-rows-[auto_minmax(0,1fr)]">
-      <header className="grid gap-3 rounded-xl border border-white/10 bg-[#020713]/92 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center">
+    <div className="public-profile-view-shell mx-auto grid w-full max-w-[1540px] gap-2.5 pb-3 text-white md:gap-3 md:pb-4 xl:grid-rows-[auto_minmax(0,1fr)]">
+      <header className="grid gap-2.5 rounded-xl border border-white/10 bg-[#020713]/92 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] md:gap-3 md:p-3 lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center">
         <Button asChild variant="secondary" className="h-10 w-fit rounded-lg border-white/12 bg-white/[0.055] text-white hover:bg-white/[0.09]">
           <Link href={backHref}>
             <ArrowLeft className="size-4" />
@@ -101,7 +106,7 @@ export function PublicProfileView({
         </Button>
         <div className="min-w-0">
           <p className="text-[0.62rem] font-black uppercase tracking-[0.16em] text-[#bcb8ff]">{headerEyebrow}</p>
-          <h1 className="truncate text-3xl font-black leading-none text-white md:text-5xl">{displayName}</h1>
+          <h1 className="truncate text-2xl font-black leading-none text-white md:text-5xl">{displayName}</h1>
           {subtitle ? <p className="mt-2 truncate text-sm font-bold text-white/58">{subtitle}</p> : null}
         </div>
         {actionHref ? (
@@ -119,10 +124,10 @@ export function PublicProfileView({
         )}
       </header>
 
-      <main className="public-profile-view-grid grid h-full min-h-0 gap-3 xl:grid-cols-2">
-        <section className="public-profile-left-column grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
-          <section className="public-profile-overview-panel rounded-xl border border-white/10 bg-[#020713]/92 p-2.5 shadow-[0_0_46px_rgba(216,177,87,0.06),inset_0_1px_0_rgba(255,255,255,0.08)]">
-            <div className="mb-2 flex items-center justify-between gap-3">
+      <main className="public-profile-view-grid grid h-full min-h-0 gap-2.5 md:gap-3 xl:grid-cols-2">
+        <section className="public-profile-left-column grid h-full min-h-0 gap-2.5 md:grid-rows-[auto_minmax(0,1fr)] md:gap-3">
+          <section className="public-profile-overview-panel rounded-xl border border-white/10 bg-[#020713]/92 p-2 shadow-[0_0_46px_rgba(216,177,87,0.06),inset_0_1px_0_rgba(255,255,255,0.08)] md:p-2.5">
+            <div className="mb-2 flex items-center justify-between gap-2 md:gap-3">
               <p className="text-[0.62rem] font-black uppercase tracking-[0.16em] text-[#d8b157]">How others see you</p>
               <span className="rounded-full border border-white/10 bg-white/[0.055] px-3 py-1 text-[0.62rem] font-black uppercase tracking-[0.12em] text-white/54">
                 Public view
@@ -143,18 +148,18 @@ export function PublicProfileView({
             </div>
           </section>
 
-          <ProfileBracketCard summary={bracketSummary} revealAt={bracketRevealAt} hiddenUntilReveal={bracketHiddenUntilReveal} />
+          {bracketAudit ? <PublicBracketAuditCard audit={bracketAudit} summary={bracketSummary} /> : <ProfileBracketCard summary={bracketSummary} revealAt={bracketRevealAt} hiddenUntilReveal={bracketHiddenUntilReveal} />}
         </section>
 
-        <section className="public-profile-right-column grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
-          <section className="public-profile-click-metrics grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="public-profile-right-column grid h-full min-h-0 gap-2.5 md:grid-rows-[auto_minmax(0,1fr)] md:gap-3">
+          <section className="public-profile-click-metrics grid grid-cols-2 gap-2.5 md:gap-3 xl:grid-cols-4">
             <PublicMetricCard iconPath="/assets/profile/stats/rank.png" label="Rank" value={stats?.rank ? `#${stats.rank}` : "--"} detail={stats?.rank ? "Top board" : "Unranked"} />
             <PublicMetricCard iconPath="/assets/profile/stats/points.png" label="Points" value={String(stats?.totalPoints ?? 0)} detail="Total points" />
             <PublicMetricCard iconPath="/assets/profile/stats/correct.png" label="Correct" value={String(stats?.correctOutcomes ?? 0)} detail="Predictions" />
             <PublicMetricCard iconPath="/assets/profile/stats/club.png" label="Club" value={clubName} detail={clubSubLabel} compactText />
           </section>
 
-          <PublicPredictionTimeline predictions={predictionPreview} />
+          <PublicPredictionTimeline predictions={predictionPreview} profileUserId={profileUserId} />
         </section>
       </main>
     </div>
@@ -175,11 +180,11 @@ function PublicMetricCard({
   compactText?: boolean;
 }) {
   return (
-    <article className="grid min-h-[132px] min-w-0 content-center justify-items-center rounded-xl border border-white/10 bg-[#071126]/78 p-2.5 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-      <img src={iconPath} alt="" className="h-9 w-9 object-contain drop-shadow-[0_0_16px_rgba(216,177,87,.35)]" />
+    <article className="grid min-h-[94px] min-w-0 content-center justify-items-center rounded-xl border border-white/10 bg-[#071126]/78 p-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] md:min-h-[132px] md:p-2.5">
+      <img src={iconPath} alt="" className="h-7 w-7 object-contain drop-shadow-[0_0_16px_rgba(216,177,87,.35)] md:h-9 md:w-9" />
       <p className="mt-2 text-[0.56rem] font-black uppercase tracking-[0.14em] text-white/48">{label}</p>
-      <p className={cn("mt-1.5 max-w-full truncate font-black leading-none text-white", compactText ? "text-base leading-tight" : "text-3xl")}>{value}</p>
-      <p className="mt-2 max-w-full truncate text-xs font-bold text-white/48">{detail}</p>
+      <p className={cn("mt-1 max-w-full truncate font-black leading-none text-white md:mt-1.5", compactText ? "text-sm leading-tight md:text-base" : "text-2xl md:text-3xl")}>{value}</p>
+      <p className="mt-1.5 max-w-full truncate text-[0.68rem] font-bold text-white/48 md:mt-2 md:text-xs">{detail}</p>
     </article>
   );
 }

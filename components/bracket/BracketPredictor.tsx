@@ -24,9 +24,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { BracketPointsGuideDialog } from "@/components/scoring/PointsSystemDialog";
+import type { DefaultPickSource } from "@/lib/bracket/defaultPredictionMetadata";
 import { pruneInvalidWinnersByMatch } from "@/lib/bracket/tournamentPathRules";
 import { getWorldCupTeamFlagPath } from "@/lib/data/worldCupTeams";
 import { resolveThirdPlaceSlotGroups } from "@/lib/data/worldCupThirdPlaceRules";
+import { resolveTop8PickPoints, TOP8_PERFECT_BONUS_POINTS } from "@/lib/scoring/timing";
 import { formatEasternCompactDateTime, formatEasternDateTime } from "@/lib/utils/easternTime";
 import { cn } from "@/lib/utils";
 
@@ -58,6 +60,7 @@ export type SavedTournamentPath = {
   top8GroupSavedAtByLetter?: Record<string, string | null>;
   thirdPlaceSlotTeamIds: Record<string, number | null>;
   winnersByMatch: Record<string, number | null>;
+  knockoutSavedAtByMatchNo?: Record<string, string | null>;
 };
 
 type Slot =
@@ -85,6 +88,11 @@ type GroupPointWindow = {
   dropAt?: string[];
 };
 
+type KnockoutMatchLock = {
+  kickoffAt: string | null;
+  locked: boolean;
+};
+
 type BracketAuditReason = {
   code?: string;
   description?: string;
@@ -98,6 +106,7 @@ type BracketGroupAudit = {
   pointValues: { first?: number; second?: number; third?: number } | null;
   reasons: BracketAuditReason[];
   scoredAt: string | null;
+  source?: DefaultPickSource | null;
 };
 
 type BracketTop8Audit = {
@@ -107,9 +116,19 @@ type BracketTop8Audit = {
   timingMultiplier: number | null;
   correctTeams: number | null;
   perfectBonus: number | null;
+  pickDetails: Array<{
+    teamId: number;
+    correct: boolean | null;
+    savedAt: string | null;
+    points: number;
+    pointsPerCorrectTeam: number;
+    timingBucket: string | null;
+    eligible: boolean | null;
+  }>;
   actualTeamIds: number[];
   reasons: BracketAuditReason[];
   scoredAt: string | null;
+  sourcesByGroup?: Record<string, DefaultPickSource>;
 };
 
 export type OwnBracketAudit = {
@@ -135,6 +154,8 @@ type BracketPredictorProps = {
   top8SavedAt: string | null;
   initialGroupSavedAtByLetter?: Record<string, string | null>;
   audit?: OwnBracketAudit | null;
+  knockoutMatchLocksByNo?: Record<string, KnockoutMatchLock>;
+  actualKnockoutWinnersByNo?: Record<string, number | null>;
 };
 
 type BuilderStep = "groups" | "thirds" | "bracket" | "summary";
@@ -400,6 +421,8 @@ export function BracketPredictor({
   top8SavedAt: initialTop8SavedAt,
   initialGroupSavedAtByLetter,
   audit,
+  knockoutMatchLocksByNo = {},
+  actualKnockoutWinnersByNo = {},
 }: BracketPredictorProps) {
   const normalizedInitialGroupSavedAt = normalizeGroupSavedAt(initialGroupSavedAtByLetter);
   const sortedGroups = useMemo(
@@ -498,37 +521,60 @@ export function BracketPredictor({
     return teamId ? teamsById.get(teamId) ?? null : null;
   };
 
+  const matchLock = (matchNo: number) => knockoutMatchLocksByNo[String(matchNo)] ?? null;
+  const matchIsIndividuallyLocked = (matchNo: number) => Boolean(matchLock(matchNo)?.locked);
+  const actualWinnerIdForMatch = (matchNo: number, teams?: [PredictorTeam | null, PredictorTeam | null]) => {
+    const actualWinnerId = Number(actualKnockoutWinnersByNo[String(matchNo)]);
+    if (!Number.isFinite(actualWinnerId) || actualWinnerId <= 0) return null;
+    if (teams && !teams.some((team) => team?.id === actualWinnerId)) return null;
+    return actualWinnerId;
+  };
+  const effectiveWinnerIdForMatch = (matchNo: number, teams?: [PredictorTeam | null, PredictorTeam | null]) => {
+    const pickedWinnerId = Number(winnersByMatch[String(matchNo)]);
+    if (Number.isFinite(pickedWinnerId) && pickedWinnerId > 0) return pickedWinnerId;
+    return actualWinnerIdForMatch(matchNo, teams);
+  };
+
   const matches = useMemo(() => {
     const byMatch = new Map<number, BracketMatch>();
-    const winnerFor = (matchNo: number) => {
-      const teamId = winnersByMatch[String(matchNo)];
+    const winnerFor = (matchNo: number, teams?: [PredictorTeam | null, PredictorTeam | null]) => {
+      const teamId = effectiveWinnerIdForMatch(matchNo, teams);
       return teamId ? teamsById.get(teamId) ?? null : null;
+    };
+    const loserForMatch = (match: BracketMatch | undefined) => {
+      if (!match) return null;
+      const winnerId = effectiveWinnerIdForMatch(match.matchNo, match.teams);
+      if (!winnerId) return null;
+      return match.teams.find((team) => team && team.id !== winnerId) ?? null;
     };
 
     for (const template of ROUND_OF_32) {
+      const teams: [PredictorTeam | null, PredictorTeam | null] = [resolveSlot(template.slots[0]), resolveSlot(template.slots[1])];
       byMatch.set(template.matchNo, {
         matchNo: template.matchNo,
         roundKey: "roundOf32",
         title: "Round of 32",
-        teams: [resolveSlot(template.slots[0]), resolveSlot(template.slots[1])],
+        teams,
         slotLabels: [template.slots[0].label, template.slots[1].label],
       });
     }
 
     for (const template of ADVANCEMENT_MATCHES) {
+      const sourceA = byMatch.get(template.from[0])?.teams;
+      const sourceB = byMatch.get(template.from[1])?.teams;
       byMatch.set(template.matchNo, {
         matchNo: template.matchNo,
         roundKey: template.roundKey,
         title: template.title,
-        teams: [winnerFor(template.from[0]), winnerFor(template.from[1])],
+        teams: [winnerFor(template.from[0], sourceA), winnerFor(template.from[1], sourceB)],
         slotLabels: [`W${template.from[0]}`, `W${template.from[1]}`],
       });
     }
 
     const semi101 = byMatch.get(101);
     const semi102 = byMatch.get(102);
-    const loser101 = loserFor(semi101, winnersByMatch);
-    const loser102 = loserFor(semi102, winnersByMatch);
+    const loser101 = loserForMatch(semi101);
+    const loser102 = loserForMatch(semi102);
 
     byMatch.set(103, {
       matchNo: 103,
@@ -541,12 +587,12 @@ export function BracketPredictor({
       matchNo: 104,
       roundKey: "final",
       title: "Final",
-      teams: [winnerFor(101), winnerFor(102)],
+      teams: [winnerFor(101, semi101?.teams), winnerFor(102, semi102?.teams)],
       slotLabels: ["W101", "W102"],
     });
 
     return Array.from(byMatch.values()).sort((a, b) => a.matchNo - b.matchNo);
-  }, [groupRankings, teamsById, thirdPlaceSlotGroups, top8TeamIdByGroup, winnersByMatch]);
+  }, [actualKnockoutWinnersByNo, groupRankings, teamsById, thirdPlaceSlotGroups, top8TeamIdByGroup, winnersByMatch]);
 
   useEffect(() => {
     const pruned = pruneInvalidWinnersByMatch(
@@ -565,8 +611,26 @@ export function BracketPredictor({
     [matches],
   );
 
+  const effectiveWinnersByMatch = useMemo(() => {
+    return Object.fromEntries(
+      matches
+        .map((match) => {
+          const pickedWinnerId = Number(winnersByMatch[String(match.matchNo)]);
+          const actualWinnerId = Number(actualKnockoutWinnersByNo[String(match.matchNo)]);
+          const winnerId =
+            Number.isFinite(pickedWinnerId) && pickedWinnerId > 0
+              ? pickedWinnerId
+              : Number.isFinite(actualWinnerId) && actualWinnerId > 0 && match.teams.some((team) => team?.id === actualWinnerId)
+                ? actualWinnerId
+                : null;
+          return winnerId ? [String(match.matchNo), winnerId] : null;
+        })
+        .filter((entry): entry is [string, number] => Boolean(entry)),
+    );
+  }, [actualKnockoutWinnersByNo, matches, winnersByMatch]);
+
   const requiredMatches = matches.filter((match) => match.teams[0] && match.teams[1]);
-  const pickedRequiredMatches = requiredMatches.filter((match) => Boolean(winnersByMatch[String(match.matchNo)]));
+  const pickedRequiredMatches = requiredMatches.filter((match) => Boolean(effectiveWinnersByMatch[String(match.matchNo)]));
   const allBracketSlotsReady = matches.length === 32 && requiredMatches.length === 32;
   const complete = allBracketSlotsReady && pickedRequiredMatches.length === 32;
   const groupsComplete = GROUP_LETTERS.every((group) => (groupRankings[group] ?? []).length === 4);
@@ -574,7 +638,7 @@ export function BracketPredictor({
   const canEnterTop8AfterGroupLock = groupLocked && (top8Open || top8Locked || top8TeamIds.length > 0);
   const thirdsComplete = groupsSubmitted && top8TeamIds.length === 8;
   const bracketReady = groupsComplete && groupsSubmitted && thirdsComplete;
-  const champion = winnersByMatch["104"] ? teamsById.get(Number(winnersByMatch["104"])) ?? null : null;
+  const champion = effectiveWinnersByMatch["104"] ? teamsById.get(Number(effectiveWinnersByMatch["104"])) ?? null : null;
   const activeRound = rounds.find((round) => round.key === mobileRound) ?? rounds[0];
   const draggingTeam = draggingTeamId ? teamsById.get(draggingTeamId) ?? null : null;
   const draggingRank =
@@ -648,23 +712,24 @@ export function BracketPredictor({
   }, [draggingTeamId]);
 
   const payload = useMemo<SavedTournamentPath>(() => {
-    const winnerIds = (matchNos: number[]) => uniqueNumberArray(matchNos.map((matchNo) => winnersByMatch[String(matchNo)]));
+    const winnerIds = (matchNos: number[]) => uniqueNumberArray(matchNos.map((matchNo) => effectiveWinnersByMatch[String(matchNo)]));
     return {
       roundOf32: uniqueNumberArray(ROUND_OF_32.flatMap((template) => template.slots.map((slot) => resolveSlot(slot)?.id ?? null))),
       roundOf16: winnerIds(range(73, 88)),
       quarterFinalists: winnerIds(range(89, 96)),
       semiFinalists: winnerIds(range(97, 100)),
       finalists: winnerIds([101, 102]),
-      champion: Number(winnersByMatch["104"]) || null,
-      thirdPlaceWinner: Number(winnersByMatch["103"]) || null,
+      champion: Number(effectiveWinnersByMatch["104"]) || null,
+      thirdPlaceWinner: Number(effectiveWinnersByMatch["103"]) || null,
       groupRankings,
       thirdPlaceGroups,
       top8TeamIds,
       top8GroupSavedAtByLetter,
       thirdPlaceSlotTeamIds,
-      winnersByMatch,
+      winnersByMatch: effectiveWinnersByMatch,
+      knockoutSavedAtByMatchNo: initialPath?.knockoutSavedAtByMatchNo ?? {},
     };
-  }, [groupRankings, thirdPlaceGroups, thirdPlaceSlotTeamIds, top8GroupSavedAtByLetter, top8TeamIds, winnersByMatch]);
+  }, [effectiveWinnersByMatch, groupRankings, initialPath?.knockoutSavedAtByMatchNo, thirdPlaceGroups, thirdPlaceSlotTeamIds, top8GroupSavedAtByLetter, top8TeamIds]);
 
   function showStep(step: BuilderStep) {
     shouldScrollToStage.current = true;
@@ -869,6 +934,17 @@ export function BracketPredictor({
       return;
     }
 
+    if (match.roundKey === "roundOf32" && matchIsIndividuallyLocked(match.matchNo)) {
+      const kickoffAt = matchLock(match.matchNo)?.kickoffAt;
+      showLockedToast(
+        `Match ${match.matchNo} has kicked off`,
+        kickoffAt
+          ? `That Round of 32 slot locked at ${formatDateTime(kickoffAt)}. If it was not saved before kickoff, that slot scores 0 and the real winner can only move forward after the result is known.`
+          : "That Round of 32 slot is locked. Previous valid picks stay saved.",
+      );
+      return;
+    }
+
     setWinnersByMatch((current) => ({ ...current, [String(match.matchNo)]: team.id }));
     toast.success(`${team.name} advanced`, {
       description: `Match ${match.matchNo} updated. Downstream picks adjust automatically.`,
@@ -886,9 +962,18 @@ export function BracketPredictor({
       return;
     }
 
-    setWinnersByMatch({});
+    const preservedLockedRoundOf32 = Object.fromEntries(
+      Object.entries(winnersByMatch).filter(([matchNo, winnerTeamId]) => {
+        const numericMatchNo = Number(matchNo);
+        return numericMatchNo >= 73 && numericMatchNo <= 88 && matchIsIndividuallyLocked(numericMatchNo) && Number(winnerTeamId) > 0;
+      }),
+    );
+    setWinnersByMatch(preservedLockedRoundOf32);
     toast.info("Knockout picks cleared", {
-      description: "Group rankings and third-place selections stayed in place.",
+      description:
+        Object.keys(preservedLockedRoundOf32).length > 0
+          ? "Locked Round of 32 picks stayed in place. Editable future picks were cleared."
+          : "Group rankings and third-place selections stayed in place.",
     });
   }
 
@@ -1224,7 +1309,7 @@ export function BracketPredictor({
               Build your full World Cup path
             </h1>
             <p className="bracket-hero-copy mt-2 max-w-3xl text-xs font-semibold leading-5 text-muted-foreground sm:text-sm md:mt-3 md:text-base md:leading-6">
-              Rank the groups, choose the Top 8 thirds, then pick every knockout match before the first kickoff.
+              Rank the groups, choose the Top 8 thirds, then build the knockout path before the final Round of 32 lock.
             </p>
             <BracketMomentumStrip activeStep={activeStep} champion={champion} />
             <BracketDeadlineStrip
@@ -1336,7 +1421,7 @@ export function BracketPredictor({
         {activeStep === "bracket" ? (
           <BracketStage
             rounds={rounds}
-            winnersByMatch={winnersByMatch}
+            winnersByMatch={effectiveWinnersByMatch}
             pickedCount={pickedRequiredMatches.length}
             champion={champion}
             signedIn={signedIn}
@@ -1355,6 +1440,7 @@ export function BracketPredictor({
             onBack={() => showStep("thirds")}
             onSummary={() => showStep("summary")}
             complete={complete}
+            knockoutMatchLocksByNo={knockoutMatchLocksByNo}
           />
         ) : null}
 
@@ -1379,9 +1465,13 @@ export function BracketPredictor({
                   Back to bracket
                 </Button>
                 {complete ? (
-                  <Button onClick={() => savePath("full")} disabled={busy || knockoutLocked}>
+                  <Button
+                    onClick={() => savePath("full")}
+                    disabled={busy || knockoutLocked}
+                    className="border-trophy-gold/45 bg-trophy-gold text-[#11131c] shadow-[0_0_0_1px_rgba(214,178,96,.3),0_14px_44px_rgba(214,178,96,.22)] hover:bg-trophy-gold/90"
+                  >
                     <Save className="size-4" />
-                    {busy ? "Saving" : "Save full path"}
+                    {busy ? "Saving" : "Save final bracket"}
                   </Button>
                 ) : null}
               </div>
@@ -1878,6 +1968,7 @@ function GroupAuditButton({
             <AuditMetric label="Points" value={released ? signedAuditPoints(audit?.points) : "--"} tone="gold" />
             <AuditMetric label="Saved" value={savedAt ? formatCompactDateTime(savedAt) : "Not saved"} />
           </div>
+          {audit?.source ? <AuditSourceNote source={audit.source} /> : null}
 
           <div className="grid gap-1.5">
             {rows.map((row) => (
@@ -1912,6 +2003,7 @@ function Top8AuditButton({
   teamGroupById,
   savedAt,
   savedAtByGroup,
+  top8LockAt,
   audit,
 }: {
   top8TeamIds: number[];
@@ -1919,18 +2011,44 @@ function Top8AuditButton({
   teamGroupById: Map<number, string>;
   savedAt: string | null;
   savedAtByGroup: Record<string, string | null>;
+  top8LockAt: string;
   audit: BracketTop8Audit | null;
 }) {
   const released = Boolean(audit?.released);
   const actualSet = new Set(audit?.actualTeamIds ?? []);
+  const hasStoredPickDetails = (audit?.pickDetails.length ?? 0) > 0;
+  const pickDetailByTeamId = new Map((audit?.pickDetails ?? []).map((detail) => [detail.teamId, detail]));
   const picks = top8TeamIds
     .map((teamId) => {
       const team = teamsById.get(teamId) ?? null;
       const group = teamGroupById.get(teamId) ?? null;
-      return team ? { team, group, savedAt: group ? savedAtByGroup[group] ?? savedAt : savedAt } : null;
+      const detail = pickDetailByTeamId.get(teamId) ?? null;
+      const pickSavedAt = detail?.savedAt ?? (group ? savedAtByGroup[group] ?? savedAt : savedAt);
+      const source = group ? audit?.sourcesByGroup?.[group] ?? null : null;
+      const resolvedSavedAt = pickSavedAt ?? source?.savedAt ?? null;
+      const fallbackTiming = released && !detail ? resolveTop8PickPoints(resolvedSavedAt, top8LockAt) : null;
+      return team ? { team, group, savedAt: resolvedSavedAt, detail, fallbackTiming, source } : null;
     })
-    .filter((pick): pick is { team: PredictorTeam; group: string | null; savedAt: string | null } => Boolean(pick))
+    .filter((pick): pick is { team: PredictorTeam; group: string | null; savedAt: string | null; detail: BracketTop8Audit["pickDetails"][number] | null; fallbackTiming: ReturnType<typeof resolveTop8PickPoints> | null; source: DefaultPickSource | null } => Boolean(pick))
     .sort((a, b) => (a.group ?? "Z").localeCompare(b.group ?? "Z"));
+  const fallbackBasePoints = released
+    ? picks.reduce((sum, pick) => {
+        const correct = pick.detail?.correct ?? actualSet.has(pick.team.id);
+        return sum + (correct && pick.fallbackTiming?.eligible ? pick.fallbackTiming.pointsPerCorrectTeam : 0);
+      }, 0)
+    : 0;
+  const fallbackPerfectBonus =
+    released &&
+    picks.length === 8 &&
+    picks.every((pick) => {
+      const correct = pick.detail?.correct ?? actualSet.has(pick.team.id);
+      const eligible = pick.detail ? pick.detail.eligible !== false : Boolean(pick.fallbackTiming?.eligible);
+      return correct && eligible;
+    })
+      ? TOP8_PERFECT_BONUS_POINTS
+      : 0;
+  const displayedPoints = released && !hasStoredPickDetails ? fallbackBasePoints + fallbackPerfectBonus : audit?.points;
+  const displayedPerfectBonus = released && !hasStoredPickDetails ? fallbackPerfectBonus : audit?.perfectBonus;
 
   return (
     <Dialog>
@@ -1962,14 +2080,15 @@ function Top8AuditButton({
         <div className="max-h-[68dvh] overflow-y-auto px-4 py-4">
           <div className="mb-3 grid grid-cols-3 gap-2">
             <AuditMetric label="Status" value={released ? "Released" : "Pending"} tone={released ? "green" : "muted"} />
-            <AuditMetric label="Points" value={released ? signedAuditPoints(audit?.points) : "--"} tone="gold" />
-            <AuditMetric label="Timing" value={released && audit?.timingMultiplier ? `${audit.timingMultiplier.toFixed(2)}x` : savedAt ? formatCompactDateTime(savedAt) : "Not saved"} />
+            <AuditMetric label="Points" value={released ? signedAuditPoints(displayedPoints) : "--"} tone="gold" />
+            <AuditMetric label="Perfect" value={released ? signedAuditPoints(displayedPerfectBonus) : "--"} />
           </div>
 
           <div className="grid gap-1.5 sm:grid-cols-2">
             {picks.length > 0 ? (
               picks.map((pick) => {
-                const correct = released ? actualSet.has(pick.team.id) : null;
+                const correct = released ? pick.detail?.correct ?? actualSet.has(pick.team.id) : null;
+                const points = released ? pick.detail?.points ?? (correct && pick.fallbackTiming?.eligible ? pick.fallbackTiming.pointsPerCorrectTeam : 0) : null;
                 return (
                   <div
                     key={pick.team.id}
@@ -1984,9 +2103,10 @@ function Top8AuditButton({
                       <span className="block truncate text-[0.62rem] font-bold text-white/42" title={pick.savedAt ? `Saved ${formatDateTime(pick.savedAt)}` : "No saved timestamp"}>
                         {pick.group ? `Group ${pick.group}` : "Group pending"} / {pick.savedAt ? `Saved ${formatCompactDateTime(pick.savedAt)}` : "Not saved"}
                       </span>
+                      {pick.source ? <AuditSourcePill source={pick.source} /> : null}
                     </span>
                     <span className={cn("text-right font-mono text-sm font-black", correct ? "text-trophy-gold" : "text-white/34")}>
-                      {released ? (correct ? "+4 base" : "+0") : "--"}
+                      {released ? signedAuditPoints(points) : "--"}
                     </span>
                   </div>
                 );
@@ -2000,6 +2120,34 @@ function Top8AuditButton({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function AuditSourceNote({ source }: { source: DefaultPickSource }) {
+  return (
+    <div
+      className={cn(
+        "mb-3 rounded-lg border px-3 py-2 text-xs font-semibold leading-5",
+        source.kind === "autosaved" ? "border-electric/25 bg-electric/10 text-electric" : "border-trophy-gold/25 bg-trophy-gold/10 text-trophy-gold",
+      )}
+    >
+      <span className="font-black uppercase tracking-[0.1em]">{source.label}</span>
+      <span className="text-white/58"> · {source.explanation}</span>
+    </div>
+  );
+}
+
+function AuditSourcePill({ source }: { source: DefaultPickSource }) {
+  return (
+    <span
+      className={cn(
+        "mt-0.5 inline-flex max-w-full rounded-full border px-2 py-0.5 text-[0.5rem] font-black uppercase tracking-[0.08em]",
+        source.kind === "autosaved" ? "border-electric/24 bg-electric/10 text-electric" : "border-trophy-gold/28 bg-trophy-gold/10 text-trophy-gold",
+      )}
+      title={source.explanation}
+    >
+      {source.label}
+    </span>
   );
 }
 
@@ -2422,12 +2570,12 @@ function ThirdsSetupStage({
       ? "Continue to bracket"
       : `Bracket opens in ${formatCountdown(knockoutOpenAt, nowMs)}`;
   const timingRows = [
-    ["Open", "Jun 18, 10:00 AM", "1.40x"],
-    ["Jun 20", "10:00 AM", "~1.20x"],
-    ["Jun 22", "10:00 AM", "~1.05x"],
-    ["Jun 23", "10:00 AM", "1.00x"],
-    ["Jun 24", "Before 3:00 PM", "1.00x"],
-    ["Lock", "Jun 24, 3:00 PM", "0x"],
+    ["Open", "Jun 18, 10:00 AM", "+9"],
+    ["Jun 20", "10:00 AM", "+8"],
+    ["Jun 22", "10:00 AM", "+6"],
+    ["Jun 23", "10:00 AM", "+4"],
+    ["Jun 24", "Before 3:00 PM", "+3"],
+    ["Lock", "Jun 24, 3:00 PM", "+0"],
   ] as const;
 
   return (
@@ -2494,6 +2642,7 @@ function ThirdsSetupStage({
               teamGroupById={teamGroupById}
               savedAt={top8SavedAt}
               savedAtByGroup={top8GroupSavedAtByLetter}
+              top8LockAt={top8LockAt}
               audit={audit ?? null}
             />
           </div>
@@ -2662,7 +2811,7 @@ function ThirdsSetupStage({
         </div>
 
         <div className="bracket-slot-map mt-4 rounded-xl border border-trophy-gold/20 bg-trophy-gold/10 p-4">
-          <p className="mb-3 text-sm font-black">Exact multiplier dates</p>
+          <p className="mb-3 text-sm font-black">Top 8 point windows</p>
           <div className="grid gap-1.5">
             {timingRows.map(([label, time, value]) => (
               <div key={`${label}-${time}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-lg border border-white/10 bg-navy-950/45 px-2.5 py-2 text-xs">
@@ -2674,6 +2823,7 @@ function ThirdsSetupStage({
               </div>
             ))}
           </div>
+          <p className="mt-3 rounded-lg border border-trophy-gold/20 bg-trophy-gold/10 px-2.5 py-2 text-xs font-black text-trophy-gold">Perfect 8/8 adds +10.</p>
         </div>
       </aside>
     </section>
@@ -2701,6 +2851,7 @@ function BracketStage({
   onBack,
   onSummary,
   complete,
+  knockoutMatchLocksByNo,
 }: {
   rounds: Round[];
   winnersByMatch: Record<string, number | null>;
@@ -2722,6 +2873,7 @@ function BracketStage({
   onBack: () => void;
   onSummary: () => void;
   complete: boolean;
+  knockoutMatchLocksByNo: Record<string, KnockoutMatchLock>;
 }) {
   const missingByRound = rounds
     .map((round) => ({
@@ -2741,7 +2893,7 @@ function BracketStage({
           </div>
           <h2 className="bracket-stage-title text-[clamp(1.45rem,7vw,2rem)] font-black leading-none md:text-[clamp(1.85rem,3.2vw,3.25rem)]">Now pick every knockout winner</h2>
           <p className="bracket-stage-copy mt-2 max-w-3xl text-xs font-semibold leading-5 text-muted-foreground md:mt-3 md:text-sm md:leading-6">
-            Click teams through each round. Later slots stay pending until the previous matchup has a winner.
+            Click teams through each round. Each Round of 32 match locks at its own kickoff; later rounds lose value as more of that branch becomes known.
           </p>
           <div className="mt-3 inline-flex w-full rounded-xl border border-electric/20 bg-electric/10 px-2.5 py-2 md:w-auto md:min-w-[16rem] md:px-3">
             <div>
@@ -2750,7 +2902,7 @@ function BracketStage({
               </p>
               <p className="mt-1 font-mono text-lg font-black text-electric">{locked ? "Locked" : open ? formatCountdown(knockoutLockAt, nowMs) : formatCountdown(knockoutOpenAt, nowMs)}</p>
               <p className="mt-1 text-xs font-semibold text-muted-foreground">
-                {open ? `Before Match 73: ${formatDateTime(knockoutLockAt)}.` : `Opens ${formatDateTime(knockoutOpenAt)} after group play.`} Progression scoring, no early multiplier.
+                {open ? `Final Round of 32 lock: ${formatDateTime(knockoutLockAt)}.` : `Opens ${formatDateTime(knockoutOpenAt)} after group play.`} Future R32 games keep full value until their own kickoff.
               </p>
             </div>
           </div>
@@ -2761,9 +2913,17 @@ function BracketStage({
             <RotateCcw className="size-4" />
             Reset picks
           </Button>
-          <Button variant={complete ? "default" : "secondary"} onClick={complete ? onSave : onSave} disabled={busy || locked || !open || !complete}>
+          <Button
+            variant={complete ? "default" : "secondary"}
+            onClick={complete ? onSave : onSave}
+            disabled={busy || locked || !open || !complete}
+            className={cn(
+              complete &&
+                "border-trophy-gold/45 bg-trophy-gold text-[#11131c] shadow-[0_0_0_1px_rgba(214,178,96,.3),0_14px_44px_rgba(214,178,96,.22)] hover:bg-trophy-gold/90",
+            )}
+          >
             {complete ? <Trophy className="size-4" /> : <Save className="size-4" />}
-            {complete ? "Save knockout" : signedIn ? "Save when complete" : "Sign in to save"}
+            {complete ? "Save final bracket" : signedIn ? "Save when complete" : "Sign in to save"}
           </Button>
           {complete ? (
             <Button variant="secondary" onClick={onSummary}>
@@ -2822,16 +2982,34 @@ function BracketStage({
       </div>
 
       <div className="2xl:hidden">
-        {activeRound ? <RoundColumn round={activeRound} winnersByMatch={winnersByMatch} onPick={onPick} mobile /> : null}
+        {activeRound ? <RoundColumn round={activeRound} winnersByMatch={winnersByMatch} knockoutMatchLocksByNo={knockoutMatchLocksByNo} onPick={onPick} mobile /> : null}
       </div>
 
       <div className="hidden max-h-[calc(100vh-18rem)] overflow-auto pb-2 pr-2 2xl:block">
         <div className="bracket-rounds-board grid min-w-[1180px] grid-cols-[1.2fr_1fr_.9fr_.82fr_.82fr_.7fr] gap-2">
           {rounds.map((round) => (
-            <RoundColumn key={round.key} round={round} winnersByMatch={winnersByMatch} onPick={onPick} />
+            <RoundColumn key={round.key} round={round} winnersByMatch={winnersByMatch} knockoutMatchLocksByNo={knockoutMatchLocksByNo} onPick={onPick} />
           ))}
         </div>
       </div>
+      {complete ? (
+        <div className="mt-3 rounded-2xl border border-trophy-gold/35 bg-trophy-gold/[0.12] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,.08)] md:mt-4 md:flex md:items-center md:justify-between md:gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-black text-trophy-gold">Final save required</p>
+            <p className="mt-1 text-xs font-semibold leading-5 text-muted-foreground">
+              Your bracket is still a draft until this save succeeds. Changed matches get their own saved timestamp.
+            </p>
+          </div>
+          <Button
+            onClick={onSave}
+            disabled={busy || locked || !open}
+            className="mt-3 w-full border-trophy-gold/45 bg-trophy-gold text-[#11131c] shadow-[0_0_0_1px_rgba(214,178,96,.3),0_14px_44px_rgba(214,178,96,.22)] hover:bg-trophy-gold/90 md:mt-0 md:w-auto"
+          >
+            <Save className="size-4" />
+            {busy ? "Saving" : "Save final bracket"}
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -2839,11 +3017,13 @@ function BracketStage({
 function RoundColumn({
   round,
   winnersByMatch,
+  knockoutMatchLocksByNo,
   onPick,
   mobile = false,
 }: {
   round: Round;
   winnersByMatch: Record<string, number | null>;
+  knockoutMatchLocksByNo: Record<string, KnockoutMatchLock>;
   onPick: (match: BracketMatch, team: PredictorTeam | null) => void;
   mobile?: boolean;
 }) {
@@ -2859,7 +3039,13 @@ function RoundColumn({
       </div>
       <div className={cn("grid gap-2", mobile ? "md:grid-cols-2 xl:grid-cols-3" : "content-between")}>
         {round.matches.map((match) => (
-          <MatchCard key={match.matchNo} match={match} winnerId={winnersByMatch[String(match.matchNo)] ?? null} onPick={onPick} />
+          <MatchCard
+            key={match.matchNo}
+            match={match}
+            winnerId={winnersByMatch[String(match.matchNo)] ?? null}
+            lockInfo={knockoutMatchLocksByNo[String(match.matchNo)] ?? null}
+            onPick={onPick}
+          />
         ))}
       </div>
     </section>
@@ -2869,14 +3055,17 @@ function RoundColumn({
 function MatchCard({
   match,
   winnerId,
+  lockInfo,
   onPick,
 }: {
   match: BracketMatch;
   winnerId: number | null;
+  lockInfo: KnockoutMatchLock | null;
   onPick: (match: BracketMatch, team: PredictorTeam | null) => void;
 }) {
   const pending = !match.teams[0] || !match.teams[1];
   const primeMatch = match.roundKey === "semiFinals" || match.roundKey === "thirdPlace" || match.roundKey === "final";
+  const lockedRoundOf32 = match.roundKey === "roundOf32" && Boolean(lockInfo?.locked);
 
   return (
     <article
@@ -2889,7 +3078,10 @@ function MatchCard({
     >
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <span className="font-mono text-[0.66rem] font-black text-electric">M{match.matchNo}</span>
-        <span className="truncate text-[0.66rem] font-bold text-muted-foreground">{match.title}</span>
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          {lockedRoundOf32 ? <Lock className="size-3 text-trophy-gold" /> : null}
+          <span className="truncate text-[0.66rem] font-bold text-muted-foreground">{lockedRoundOf32 ? "R32 locked" : match.title}</span>
+        </span>
       </div>
       <div className="grid gap-1.5">
         {[0, 1].map((index) => {
@@ -2904,6 +3096,7 @@ function MatchCard({
                 isWinner
                   ? "is-winner !border-trophy-gold/60 !bg-trophy-gold/15 !text-foreground !shadow-[0_0_0_1px_rgba(214,178,96,.28),0_0_28px_rgba(214,178,96,.22),0_16px_42px_rgba(214,178,96,.18)]"
                   : "border-white/10 bg-navy-950/55 text-muted-foreground hover:border-white/20 hover:bg-white/[0.06] hover:text-foreground",
+                lockedRoundOf32 && !isWinner && "opacity-70 hover:border-white/10 hover:bg-navy-950/55 hover:text-muted-foreground",
               )}
               onClick={() => onPick(match, team)}
             >
@@ -2917,10 +3110,12 @@ function MatchCard({
                   "bracket-pick-state inline-flex min-w-[2.7rem] justify-center justify-self-end rounded-full border px-1 py-1 text-[0.52rem] font-black uppercase leading-none md:min-w-[3.15rem] md:px-1.5 md:text-[0.58rem]",
                   isWinner
                     ? "is-winner !border-trophy-gold/60 !bg-trophy-gold/20 !text-trophy-gold shadow-[0_0_18px_rgba(214,178,96,.18)]"
-                    : "border-white/10 bg-white/[0.045] text-muted-foreground",
+                    : lockedRoundOf32
+                      ? "border-trophy-gold/20 bg-trophy-gold/10 text-trophy-gold"
+                      : "border-white/10 bg-white/[0.045] text-muted-foreground",
                 )}
               >
-                {isWinner ? "Winner" : "Pick"}
+                {isWinner ? "Winner" : lockedRoundOf32 ? "Locked" : "Pick"}
               </span>
             </button>
           );
@@ -3000,9 +3195,13 @@ function SummaryPanel({
         </div>
       ) : null}
       {signedIn ? (
-        <Button onClick={savePath} disabled={busy || locked}>
+        <Button
+          onClick={savePath}
+          disabled={busy || locked}
+          className="border-trophy-gold/45 bg-trophy-gold text-[#11131c] shadow-[0_0_0_1px_rgba(214,178,96,.3),0_14px_44px_rgba(214,178,96,.22)] hover:bg-trophy-gold/90"
+        >
           <Save className="size-4" />
-          {busy ? "Saving" : "Save full path"}
+          {busy ? "Saving" : "Save final bracket"}
         </Button>
       ) : (
         <Button asChild>
@@ -3129,13 +3328,6 @@ function SummaryStat({ label, value }: { label: string; value: number }) {
       <p className="mt-1 font-mono text-xl font-black">{value}</p>
     </div>
   );
-}
-
-function loserFor(match: BracketMatch | undefined, winnersByMatch: Record<string, number | null>) {
-  if (!match) return null;
-  const winnerId = winnersByMatch[String(match.matchNo)];
-  if (!winnerId || !match.teams[0] || !match.teams[1]) return null;
-  return match.teams.find((team) => team && team.id !== winnerId) ?? null;
 }
 
 function range(start: number, end: number) {

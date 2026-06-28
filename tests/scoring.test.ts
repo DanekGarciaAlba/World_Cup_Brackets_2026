@@ -295,13 +295,14 @@ describe("tournament path scoring", () => {
       { kickoff_at: "2026-06-24T19:00:00Z", group_name: "Group A", home_team_id: 1, away_team_id: 4 },
       { kickoff_at: "2026-06-27T21:00:00Z", group_name: "Group L", home_team_id: 47, away_team_id: 48 },
       { kickoff_at: "2026-06-28T19:00:00Z", round: "Round of 32", stage: "knockout" },
+      { kickoff_at: "2026-07-04T01:30:00Z", round: "Round of 32", stage: "knockout" },
     ]);
 
     expect(deadlines.knockoutOpenAt).toBe("2026-06-28T00:00:00.000Z");
-    expect(deadlines.knockoutLockAt).toBe("2026-06-28T19:00:00.000Z");
+    expect(deadlines.knockoutLockAt).toBe("2026-07-04T01:30:00.000Z");
   });
 
-  it("scores knockout progression without an early timing multiplier", () => {
+  it("scores legacy knockout progression without an early timing multiplier", () => {
     const score = calculateBracketPoints(
       {
         roundOf16TeamIds: [1, 2],
@@ -321,7 +322,7 @@ describe("tournament path scoring", () => {
       },
     );
 
-    expect(score.total).toBe(53);
+    expect(score.total).toBe(111);
     expect(score.reasons.map((reason) => reason.code)).toEqual([
       "bracket_reached_round_of_16",
       "bracket_reached_quarter_final",
@@ -330,6 +331,99 @@ describe("tournament path scoring", () => {
       "bracket_champion",
     ]);
     expect(score.timing.multiplierBP).toBe(100);
+  });
+
+  it("scores a perfect blind knockout bracket as 350 points", () => {
+    const matchNos = Array.from({ length: 32 }, (_, index) => 73 + index);
+    const winnersByMatch = Object.fromEntries(matchNos.map((matchNo) => [String(matchNo), 1000 + matchNo]));
+    const savedAtByMatchNo = Object.fromEntries(matchNos.map((matchNo) => [String(matchNo), "2026-06-28T00:05:00Z"]));
+    const kickoffByMatchNo = Object.fromEntries(
+      Array.from({ length: 16 }, (_, index) => {
+        const matchNo = 73 + index;
+        return [String(matchNo), new Date(Date.parse("2026-06-28T19:00:00Z") + index * 6 * 36e5).toISOString()];
+      }),
+    );
+
+    const score = calculateBracketPoints(
+      {
+        winnersByMatch,
+        knockoutSavedAtByMatchNo: savedAtByMatchNo,
+        knockoutMatchKickoffByMatchNo: kickoffByMatchNo,
+        predictedAt: "2026-06-28T00:05:00Z",
+        knockoutOpenAt: "2026-06-28T00:00:00Z",
+        knockoutLockAt: "2026-07-04T01:30:00Z",
+      },
+      { winnersByMatch },
+    );
+
+    expect(score.total).toBe(350);
+    expect(score.reasons.map((reason) => reason.code)).toContain("bracket_perfect_round_of_32");
+    expect(score.reasons.find((reason) => reason.code === "bracket_champion")?.points).toBe(60);
+  });
+
+  it("reduces only the affected branch when Round of 32 feeder results become known", () => {
+    const kickoffByMatchNo = {
+      "73": "2026-06-28T19:00:00Z",
+      "75": "2026-06-29T19:00:00Z",
+      "80": "2026-07-01T19:00:00Z",
+      "89": "2026-07-05T19:00:00Z",
+    };
+    const oneFeederKnown = calculateBracketPoints(
+      {
+        winnersByMatch: { "89": 500 },
+        knockoutSavedAtByMatchNo: { "89": "2026-06-28T20:00:00Z" },
+        knockoutMatchKickoffByMatchNo: kickoffByMatchNo,
+        predictedAt: "2026-06-28T00:05:00Z",
+        knockoutOpenAt: "2026-06-28T00:00:00Z",
+        knockoutLockAt: "2026-07-04T01:30:00Z",
+      },
+      { winnersByMatch: { "89": 500 } },
+    );
+
+    const bothFeedersKnown = calculateBracketPoints(
+      {
+        winnersByMatch: { "89": 500 },
+        knockoutSavedAtByMatchNo: { "89": "2026-06-29T20:00:00Z" },
+        knockoutMatchKickoffByMatchNo: kickoffByMatchNo,
+        predictedAt: "2026-06-28T00:05:00Z",
+        knockoutOpenAt: "2026-06-28T00:00:00Z",
+        knockoutLockAt: "2026-07-04T01:30:00Z",
+      },
+      { winnersByMatch: { "89": 500 } },
+    );
+
+    const unrelatedFutureR32 = calculateBracketPoints(
+      {
+        winnersByMatch: { "80": 800 },
+        knockoutSavedAtByMatchNo: { "80": "2026-06-28T20:00:00Z" },
+        knockoutMatchKickoffByMatchNo: kickoffByMatchNo,
+        predictedAt: "2026-06-28T00:05:00Z",
+        knockoutOpenAt: "2026-06-28T00:00:00Z",
+        knockoutLockAt: "2026-07-04T01:30:00Z",
+      },
+      { winnersByMatch: { "80": 800 } },
+    );
+
+    expect(oneFeederKnown.total).toBe(6);
+    expect(bothFeedersKnown.total).toBe(4);
+    expect(unrelatedFutureR32.total).toBe(4);
+  });
+
+  it("scores an R32 pick as zero once that exact match has kicked off", () => {
+    const score = calculateBracketPoints(
+      {
+        winnersByMatch: { "73": 101 },
+        knockoutSavedAtByMatchNo: { "73": "2026-06-28T19:00:00Z" },
+        knockoutMatchKickoffByMatchNo: { "73": "2026-06-28T19:00:00Z" },
+        predictedAt: "2026-06-28T00:05:00Z",
+        knockoutOpenAt: "2026-06-28T00:00:00Z",
+        knockoutLockAt: "2026-07-04T01:30:00Z",
+      },
+      { winnersByMatch: { "73": 101 } },
+    );
+
+    expect(score.total).toBe(0);
+    expect(score.reasons).toEqual([]);
   });
 
   it("does not score knockout picks saved before the official Round of 32 window", () => {
@@ -352,7 +446,7 @@ describe("tournament path scoring", () => {
     expect(score.timing.bucket).toBe("before_window");
   });
 
-  it("scores top-eight third-place picks with perfect early bonus", () => {
+  it("scores top-eight third-place picks with the Jun 20 fixed window and perfect bonus", () => {
     const score = calculateBracketSegmentPoints({
       kind: "top8",
       predictedTeamIds: [1, 2, 3, 4, 5, 6, 7, 8],
@@ -361,12 +455,14 @@ describe("tournament path scoring", () => {
       lockAt: "2026-06-24T19:00:00Z",
     });
 
-    expect(score.basePoints).toBe(40);
-    expect(score.total).toBe(48);
-    expect(score.timing.multiplierBP).toBe(120);
+    expect(score.basePoints).toBe(64);
+    expect(score.perfectBonus).toBe(10);
+    expect(score.total).toBe(74);
+    expect(score.pickDetails?.every((pick) => pick.pointsPerCorrectTeam === 8)).toBe(true);
+    expect(score.timing.multiplierBP).toBe(100);
   });
 
-  it("keeps late top-eight picks at the 1.00x floor before lock", () => {
+  it("scores late Jun 23 top-eight picks at +4 each before lock", () => {
     const score = calculateBracketSegmentPoints({
       kind: "top8",
       predictedTeamIds: [1, 2, 3, 4, 5, 6, 7, 8],
@@ -375,12 +471,14 @@ describe("tournament path scoring", () => {
       lockAt: "2026-06-24T19:00:00Z",
     });
 
-    expect(score.basePoints).toBe(40);
-    expect(score.total).toBe(40);
+    expect(score.basePoints).toBe(32);
+    expect(score.perfectBonus).toBe(10);
+    expect(score.total).toBe(42);
+    expect(score.pickDetails?.every((pick) => pick.pointsPerCorrectTeam === 4)).toBe(true);
     expect(score.timing.multiplierBP).toBe(100);
   });
 
-  it("scores top-eight third-place picks at 1.40x when the window opens", () => {
+  it("scores top-eight third-place picks at +9 each when the window opens", () => {
     const score = calculateBracketSegmentPoints({
       kind: "top8",
       predictedTeamIds: [1, 2, 3, 4, 5, 6, 7, 8],
@@ -389,9 +487,33 @@ describe("tournament path scoring", () => {
       lockAt: "2026-06-24T19:00:00Z",
     });
 
-    expect(score.basePoints).toBe(40);
-    expect(score.total).toBe(56);
-    expect(score.timing.multiplierBP).toBe(140);
+    expect(score.basePoints).toBe(72);
+    expect(score.perfectBonus).toBe(10);
+    expect(score.total).toBe(82);
+    expect(score.pickDetails?.every((pick) => pick.pointsPerCorrectTeam === 9)).toBe(true);
+    expect(score.timing.multiplierBP).toBe(100);
+  });
+
+  it("scores each top-eight team from that team's own saved timestamp", () => {
+    const score = calculateBracketSegmentPoints({
+      kind: "top8",
+      predictedTeamIds: [1, 2, 3, 4],
+      actualTeamIds: [1, 2, 3],
+      submittedAt: "2026-06-24T13:00:00Z",
+      top8PickSavedAtByTeamId: {
+        "1": "2026-06-18T14:00:00Z",
+        "2": "2026-06-20T14:00:00Z",
+        "3": "2026-06-24T13:00:00Z",
+        "4": "2026-06-22T14:00:00Z",
+      },
+      lockAt: "2026-06-24T19:00:00Z",
+    });
+
+    expect(score.correctTeams).toBe(3);
+    expect(score.basePoints).toBe(20);
+    expect(score.perfectBonus).toBe(0);
+    expect(score.total).toBe(20);
+    expect(score.pickDetails?.map((pick) => pick.points)).toEqual([9, 8, 3, 0]);
   });
 
   it("scores top-eight third-place picks as zero at the global lock", () => {
