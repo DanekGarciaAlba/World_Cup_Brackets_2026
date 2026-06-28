@@ -221,7 +221,7 @@ async function getOwnBracketAudit(userId?: string | null): Promise<OwnBracketAud
 export default async function BracketPage() {
   const supabase = await createClient();
   const { data: auth } = await supabase.auth.getUser();
-  const [worldCupData, saved, audit] = await Promise.all([getWorldCupDashboardData(auth.user?.id), getSavedTournamentPath(auth.user?.id), getOwnBracketAudit(auth.user?.id)]);
+  const [worldCupData, saved, audit] = await Promise.all([getWorldCupDashboardData(), getSavedTournamentPath(auth.user?.id), getOwnBracketAudit(auth.user?.id)]);
   const firstKickoffAt = worldCupData.matches[0]?.kickoffAt ?? null;
   const deadlines = deriveWorldCupDeadlines(worldCupData.matches);
   const now = Date.now();
