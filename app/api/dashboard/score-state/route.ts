@@ -3,6 +3,20 @@ import { requireUser } from "@/lib/auth/requireUser";
 import type { RecentMatchScore } from "@/lib/scoring/recentMatchScores";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+const MATCH_SCORE_HISTORY_LIMIT = 80;
+const POINT_RELEASE_HISTORY_LIMIT = 40;
+
+type RecentPointRelease = {
+  id: string;
+  label: string;
+  body: string;
+  points: number;
+  scoredAt: string | null;
+  sortAt: string | null;
+  href: string;
+  accent: "gold" | "green" | "blue";
+};
+
 export async function GET() {
   let user;
   try {
@@ -29,7 +43,10 @@ export async function GET() {
   if (leaderboardError) return NextResponse.json({ error: leaderboardError.message }, { status: 500 });
 
   const source = (stats ?? leaderboard ?? {}) as Record<string, any>;
-  const recentMatchScores = await getRecentMatchScores(supabase, user.id);
+  const [recentMatchScores, recentPointReleases] = await Promise.all([
+    getRecentMatchScores(supabase, user.id),
+    getRecentPointReleases(supabase, user.id),
+  ]);
 
   return NextResponse.json({
     userId: user.id,
@@ -42,7 +59,82 @@ export async function GET() {
     lastPointsAt: typeof source.last_points_at === "string" ? source.last_points_at : null,
     updatedAt: typeof source.updated_at === "string" ? source.updated_at : null,
     recentMatchScores,
+    recentPointReleases,
   });
+}
+
+function record(value: unknown): Record<string, any> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value)) ? (value as Record<string, any>) : {};
+}
+
+function numberOrNull(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+async function getRecentPointReleases(supabase: ReturnType<typeof createAdminClient>, userId: string): Promise<RecentPointRelease[]> {
+  const { data: scores, error } = await supabase
+    .from("prediction_scores")
+    .select("prediction_id,prediction_type,points,metadata,scored_at,calculated_at")
+    .eq("user_id", userId)
+    .in("prediction_type", ["bracket_group", "bracket_third_place"])
+    .gt("points", 0)
+    .order("scored_at", { ascending: false })
+    .limit(POINT_RELEASE_HISTORY_LIMIT);
+
+  if (error || !scores || scores.length === 0) return [];
+
+  const groupPredictionIds = scores.filter((score: any) => score.prediction_type === "bracket_group").map((score: any) => String(score.prediction_id));
+  const { data: groupPredictions } =
+    groupPredictionIds.length > 0
+      ? await supabase.from("group_predictions").select("id,group_name").in("id", groupPredictionIds)
+      : { data: [] as any[] };
+  const groupByPredictionId = new Map((groupPredictions ?? []).map((prediction: any) => [String(prediction.id), String(prediction.group_name ?? "")]));
+
+  return scores
+    .map((score: any): RecentPointRelease | null => {
+      const points = Number(score.points ?? 0);
+      if (!Number.isFinite(points) || points <= 0) return null;
+
+      const scoredAt = typeof score.scored_at === "string" ? score.scored_at : typeof score.calculated_at === "string" ? score.calculated_at : null;
+      const predictionId = String(score.prediction_id);
+      const metadata = record(score.metadata);
+
+      if (score.prediction_type === "bracket_group") {
+        const groupName = groupByPredictionId.get(predictionId);
+        const groupLetter = groupName?.match(/[A-L]$/i)?.[0]?.toUpperCase() ?? "?";
+        return {
+          id: `bracket_group:${predictionId}:${scoredAt ?? "pending"}`,
+          label: `Group ${groupLetter} release`,
+          body: `Group ${groupLetter} ranking points are ready to audit.`,
+          points,
+          scoredAt,
+          sortAt: scoredAt,
+          href: "/bracket",
+          accent: "green",
+        };
+      }
+
+      const correctTeams = numberOrNull(metadata.correctTeams);
+      const perfectBonus = numberOrNull(metadata.perfectBonus);
+      const bodyParts = [
+        correctTeams !== null ? `${correctTeams}/8 correct teams` : "Top 8 third-place points are ready to audit",
+        perfectBonus && perfectBonus > 0 ? `+${perfectBonus} perfect bonus` : null,
+      ].filter(Boolean);
+
+      return {
+        id: `bracket_top8:${predictionId}:${scoredAt ?? "pending"}`,
+        label: "Top 8 release",
+        body: bodyParts.join(" / "),
+        points,
+        scoredAt,
+        sortAt: scoredAt,
+        href: "/bracket",
+        accent: "gold",
+      };
+    })
+    .filter((release): release is RecentPointRelease => Boolean(release));
 }
 
 async function getRecentMatchScores(supabase: ReturnType<typeof createAdminClient>, userId: string): Promise<RecentMatchScore[]> {
@@ -53,7 +145,8 @@ async function getRecentMatchScores(supabase: ReturnType<typeof createAdminClien
     .eq("prediction_type", "daily_match")
     .not("match_id", "is", null)
     .order("scored_at", { ascending: false })
-    .limit(6);
+    .order("match_id", { ascending: false })
+    .limit(MATCH_SCORE_HISTORY_LIMIT);
 
   if (error || !scores || scores.length === 0) return [];
 
@@ -118,5 +211,12 @@ async function getRecentMatchScores(supabase: ReturnType<typeof createAdminClien
         scoredAt: typeof score.scored_at === "string" ? score.scored_at : typeof score.calculated_at === "string" ? score.calculated_at : null,
       } satisfies RecentMatchScore;
     })
-    .filter((score): score is RecentMatchScore => Boolean(score));
+    .filter((score): score is RecentMatchScore => Boolean(score))
+    .sort((a, b) => {
+      const kickoffDiff = new Date(b.kickoffAt).getTime() - new Date(a.kickoffAt).getTime();
+      if (Number.isFinite(kickoffDiff) && kickoffDiff !== 0) return kickoffDiff;
+      const scoredDiff = new Date(b.scoredAt ?? "").getTime() - new Date(a.scoredAt ?? "").getTime();
+      if (Number.isFinite(scoredDiff) && scoredDiff !== 0) return scoredDiff;
+      return b.matchId - a.matchId;
+    });
 }

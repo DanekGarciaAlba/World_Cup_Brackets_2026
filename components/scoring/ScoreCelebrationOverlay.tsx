@@ -7,6 +7,7 @@ import {
   matchScoreAcknowledgementKey,
   type RecentMatchScore,
 } from "@/lib/scoring/recentMatchScores";
+import { pushClientNotifications, syncClientNotifications, type ClientNotification } from "@/lib/notifications/clientNotifications";
 
 type ScoreState = {
   userId: string;
@@ -19,6 +20,18 @@ type ScoreState = {
   lastPointsAt: string | null;
   updatedAt: string | null;
   recentMatchScores: RecentMatchScore[];
+  recentPointReleases: RecentPointRelease[];
+};
+
+type RecentPointRelease = {
+  id: string;
+  label: string;
+  body: string;
+  points: number;
+  scoredAt: string | null;
+  sortAt: string | null;
+  href: string;
+  accent: "gold" | "green" | "blue";
 };
 
 type ScoreCelebration = {
@@ -33,6 +46,7 @@ type ScoreCelebration = {
 const POLL_MS = 60000;
 const STORAGE_PREFIX = "wc-score-state:v1";
 const MATCH_ACK_PREFIX = "wc-score-match-acks:v1";
+const POINT_RELEASE_ACK_PREFIX = "wc-score-release-acks:v1";
 
 function toNumber(value: unknown) {
   const number = typeof value === "number" ? value : Number(value);
@@ -52,6 +66,7 @@ function normalizeScoreState(payload: any): ScoreState | null {
     lastPointsAt: typeof payload.lastPointsAt === "string" ? payload.lastPointsAt : null,
     updatedAt: typeof payload.updatedAt === "string" ? payload.updatedAt : null,
     recentMatchScores: normalizeRecentMatchScores(payload.recentMatchScores),
+    recentPointReleases: normalizeRecentPointReleases(payload.recentPointReleases),
   };
 }
 
@@ -82,12 +97,41 @@ function normalizeRecentMatchScores(value: unknown): RecentMatchScore[] {
     .filter((score): score is RecentMatchScore => Boolean(score));
 }
 
+function normalizeRecentPointReleases(value: unknown): RecentPointRelease[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((release): RecentPointRelease | null => {
+      const id = String((release as any)?.id ?? "").trim();
+      const label = String((release as any)?.label ?? "").trim();
+      const body = String((release as any)?.body ?? "").trim();
+      const href = String((release as any)?.href ?? "/bracket");
+      const accent = String((release as any)?.accent ?? "blue");
+      const points = toNumber((release as any)?.points);
+      if (!id || !label || !body || points <= 0 || !href.startsWith("/")) return null;
+      return {
+        id,
+        label,
+        body,
+        points,
+        scoredAt: typeof (release as any)?.scoredAt === "string" ? (release as any).scoredAt : null,
+        sortAt: typeof (release as any)?.sortAt === "string" ? (release as any).sortAt : null,
+        href,
+        accent: accent === "gold" || accent === "green" || accent === "blue" ? accent : "blue",
+      };
+    })
+    .filter((release): release is RecentPointRelease => Boolean(release));
+}
+
 function storageKey(userId: string) {
   return `${STORAGE_PREFIX}:${userId}`;
 }
 
 function matchAckStorageKey(userId: string) {
   return `${MATCH_ACK_PREFIX}:${userId}`;
+}
+
+function pointReleaseAckStorageKey(userId: string) {
+  return `${POINT_RELEASE_ACK_PREFIX}:${userId}`;
 }
 
 function readBaseline(userId: string) {
@@ -128,6 +172,31 @@ function writeAcknowledgedMatchScores(userId: string, scores: RecentMatchScore[]
   }
 }
 
+function pointReleaseAcknowledgementKey(release: RecentPointRelease) {
+  return `${release.id}:${release.points}`;
+}
+
+function readAcknowledgedPointReleases(userId: string) {
+  try {
+    const raw = window.localStorage.getItem(pointReleaseAckStorageKey(userId));
+    const values = raw ? (JSON.parse(raw) as unknown) : [];
+    return new Set(Array.isArray(values) ? values.map(String) : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function writeAcknowledgedPointReleases(userId: string, releases: RecentPointRelease[]) {
+  if (releases.length === 0) return;
+  try {
+    const next = readAcknowledgedPointReleases(userId);
+    for (const release of releases) next.add(pointReleaseAcknowledgementKey(release));
+    window.localStorage.setItem(pointReleaseAckStorageKey(userId), JSON.stringify(Array.from(next).slice(-80)));
+  } catch {
+    // localStorage can be unavailable in private or locked-down browser sessions.
+  }
+}
+
 function previousFromMatchScores(current: ScoreState, scores: RecentMatchScore[], pointsDelta: number, exactDelta: number, correctDelta: number): ScoreState {
   return {
     ...current,
@@ -135,7 +204,63 @@ function previousFromMatchScores(current: ScoreState, scores: RecentMatchScore[]
     exactScores: Math.max(0, current.exactScores - exactDelta),
     correctOutcomes: Math.max(0, current.correctOutcomes - correctDelta),
     recentMatchScores: [],
+    recentPointReleases: [],
   };
+}
+
+function hasVerifiableMatchScore(score: RecentMatchScore) {
+  return Boolean(score.scoredAt) && score.actualScoreLabel.trim() !== "--" && score.predictedScoreLabel.trim() !== "--";
+}
+
+function hasPositiveVerifiableMatchScore(score: RecentMatchScore) {
+  return score.points > 0 && hasVerifiableMatchScore(score);
+}
+
+function hasPositivePointRelease(release: RecentPointRelease) {
+  return release.points > 0 && Boolean(release.scoredAt);
+}
+
+function matchScoreNotifications(userId: string, scores: RecentMatchScore[]): ClientNotification[] {
+  const verifiedScores = scores.filter(hasPositiveVerifiableMatchScore);
+  return verifiedScores.map((score): ClientNotification => ({
+      id: `score:${userId}:${matchScoreAcknowledgementKey(score)}`,
+      kind: "score",
+      title: `+${score.points} pts from ${score.matchLabel}`,
+      body: `${score.homeTeamName} ${score.actualScoreLabel} ${score.awayTeamName}. Your pick ${score.predictedScoreLabel}.`,
+      createdAt: score.scoredAt ?? new Date().toISOString(),
+      sortAt: score.kickoffAt || score.scoredAt || undefined,
+      href: "/dashboard",
+      accent: score.exactScore ? "gold" : score.correctOutcome ? "green" : "blue",
+    }));
+}
+
+function pointReleaseNotifications(userId: string, releases: RecentPointRelease[]): ClientNotification[] {
+  return releases.filter(hasPositivePointRelease).map((release): ClientNotification => ({
+    id: `score:${userId}:release:${pointReleaseAcknowledgementKey(release)}`,
+    kind: "score",
+    title: `+${release.points} pts from ${release.label}`,
+    body: release.body,
+    createdAt: release.scoredAt ?? new Date().toISOString(),
+    sortAt: release.sortAt ?? release.scoredAt ?? undefined,
+    href: release.href,
+    accent: release.accent,
+  }));
+}
+
+function syncMatchScoreNotifications(userId: string, scores: RecentMatchScore[]) {
+  syncClientNotifications(matchScoreNotifications(userId, scores));
+}
+
+function pushMatchScoreNotifications(userId: string, scores: RecentMatchScore[]) {
+  pushClientNotifications(matchScoreNotifications(userId, scores));
+}
+
+function syncPointReleaseNotifications(userId: string, releases: RecentPointRelease[]) {
+  syncClientNotifications(pointReleaseNotifications(userId, releases));
+}
+
+function pushPointReleaseNotifications(userId: string, releases: RecentPointRelease[]) {
+  pushClientNotifications(pointReleaseNotifications(userId, releases));
 }
 
 export function ScoreCelebrationOverlay() {
@@ -150,7 +275,13 @@ export function ScoreCelebrationOverlay() {
       if (!current) return;
 
       const acknowledged = readAcknowledgedMatchScores(current.userId);
-      const newMatchScores = filterUnacknowledgedMatchScores(current.recentMatchScores, acknowledged);
+      const acknowledgedPointReleases = readAcknowledgedPointReleases(current.userId);
+      const verifiedRecentScores = current.recentMatchScores.filter(hasPositiveVerifiableMatchScore);
+      const verifiedPointReleases = current.recentPointReleases.filter(hasPositivePointRelease);
+      syncMatchScoreNotifications(current.userId, verifiedRecentScores);
+      syncPointReleaseNotifications(current.userId, verifiedPointReleases);
+      const newMatchScores = filterUnacknowledgedMatchScores(verifiedRecentScores, acknowledged);
+      const newPointReleases = verifiedPointReleases.filter((release) => !acknowledgedPointReleases.has(pointReleaseAcknowledgementKey(release)));
       const newMatchPoints = newMatchScores.reduce((sum, score) => sum + Math.max(0, score.points), 0);
       const newExactCount = newMatchScores.filter((score) => score.exactScore).length;
       const newCorrectCount = newMatchScores.filter((score) => score.correctOutcome).length;
@@ -159,6 +290,9 @@ export function ScoreCelebrationOverlay() {
         writeBaseline(current);
         if (newMatchScores.length > 0) {
           writeAcknowledgedMatchScores(current.userId, newMatchScores);
+          pushMatchScoreNotifications(current.userId, newMatchScores);
+          writeAcknowledgedPointReleases(current.userId, newPointReleases);
+          pushPointReleaseNotifications(current.userId, newPointReleases);
           setCelebration({
             previous: previousFromMatchScores(current, newMatchScores, newMatchPoints, newExactCount, newCorrectCount),
             current,
@@ -167,6 +301,9 @@ export function ScoreCelebrationOverlay() {
             correctDelta: newCorrectCount,
             matchScores: newMatchScores,
           });
+        } else if (newPointReleases.length > 0) {
+          writeAcknowledgedPointReleases(current.userId, newPointReleases);
+          pushPointReleaseNotifications(current.userId, newPointReleases);
         }
         return;
       }
@@ -178,28 +315,36 @@ export function ScoreCelebrationOverlay() {
       if (pointsDelta < 0 || exactDelta < 0 || correctDelta < 0) {
         writeBaseline(current);
         writeAcknowledgedMatchScores(current.userId, newMatchScores);
+        pushMatchScoreNotifications(current.userId, newMatchScores);
+        writeAcknowledgedPointReleases(current.userId, newPointReleases);
+        pushPointReleaseNotifications(current.userId, newPointReleases);
         return;
       }
 
-      const displayPointsDelta = Math.max(0, pointsDelta, newMatchPoints);
-      const displayExactDelta = Math.max(0, exactDelta, newExactCount);
-      const displayCorrectDelta = Math.max(0, correctDelta, newCorrectCount);
-      const displayPrevious =
-        displayPointsDelta > pointsDelta || displayExactDelta > exactDelta || displayCorrectDelta > correctDelta
-          ? previousFromMatchScores(current, newMatchScores, displayPointsDelta, displayExactDelta, displayCorrectDelta)
-          : previous;
-
-      if (displayPointsDelta > 0 || displayExactDelta > 0 || displayCorrectDelta > 0 || newMatchScores.length > 0) {
+      if (newMatchScores.length > 0) {
+        const displayPointsDelta = newMatchPoints;
+        const displayExactDelta = newExactCount;
+        const displayCorrectDelta = newCorrectCount;
         writeBaseline(current);
         writeAcknowledgedMatchScores(current.userId, newMatchScores);
+        pushMatchScoreNotifications(current.userId, newMatchScores);
+        writeAcknowledgedPointReleases(current.userId, newPointReleases);
+        pushPointReleaseNotifications(current.userId, newPointReleases);
         setCelebration({
-          previous: displayPrevious,
+          previous: previousFromMatchScores(current, newMatchScores, displayPointsDelta, displayExactDelta, displayCorrectDelta),
           current,
           pointsDelta: displayPointsDelta,
           exactDelta: displayExactDelta,
           correctDelta: displayCorrectDelta,
           matchScores: newMatchScores,
         });
+        return;
+      }
+
+      if (newPointReleases.length > 0) {
+        writeBaseline(current);
+        writeAcknowledgedPointReleases(current.userId, newPointReleases);
+        pushPointReleaseNotifications(current.userId, newPointReleases);
         return;
       }
 

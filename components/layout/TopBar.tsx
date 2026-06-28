@@ -1,6 +1,7 @@
-import { Bell, Globe2 } from "lucide-react";
+import { Globe2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { NewsCenterButton } from "@/components/layout/NewsCenterButton";
+import { NotificationCenterButton } from "@/components/layout/NotificationCenterButton";
 
 type TopBarProps = {
   title?: string;
@@ -15,12 +16,8 @@ export function TopBar({ title = "Dashboard", subtitle = "Your tournament hub. M
         <p className="mt-1 text-sm text-muted-foreground md:text-base">{subtitle}</p>
       </div>
       <div className="flex items-center gap-2">
-        <Button size="icon" variant="secondary" aria-label="Notifications" className="relative">
-          <Bell className="size-4" />
-          <span className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-electric text-[10px] font-semibold text-white">
-            2
-          </span>
-        </Button>
+        <NotificationCenterButton />
+        <NewsCenterButton />
         <Badge variant="secondary" className="min-h-11 gap-2 px-3">
           <Globe2 className="size-4" />
           World Cup 2026

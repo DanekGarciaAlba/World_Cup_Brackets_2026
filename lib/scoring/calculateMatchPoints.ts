@@ -1,64 +1,105 @@
-import type { MatchPrediction, MatchResult, ScoreReason } from "@/lib/scoring/scoringTypes";
+import type { MatchPrediction, MatchResult, ScoreReason } from "./scoringTypes";
+import { applyBasisPointMultiplier, resolveFixtureTiming, resolveMatchStageMultiplier } from "./timing";
 
-function outcome(home: number, away: number) {
+export function matchOutcome(home: number, away: number) {
   if (home > away) return "home";
   if (away > home) return "away";
   return "draw";
 }
 
-function hoursBeforeKickoff(predictedAt?: string | Date | null, kickoffAt?: string | Date | null) {
-  if (!predictedAt || !kickoffAt) return 0;
-  const predicted = new Date(predictedAt).getTime();
-  const kickoff = new Date(kickoffAt).getTime();
-  if (!Number.isFinite(predicted) || !Number.isFinite(kickoff)) return 0;
-  return (kickoff - predicted) / 36e5;
+export function isAdvancerScoringStage(stage?: string | null) {
+  const normalized = String(stage ?? "group").toLowerCase().replace(/\s+/g, "_").replace(/-/g, "_");
+  if (normalized.includes("group")) return false;
+  return (
+    normalized.includes("round_of_32") ||
+    normalized.includes("round_of_16") ||
+    normalized.includes("quarter") ||
+    normalized.includes("semi") ||
+    normalized.includes("third") ||
+    normalized.includes("final")
+  );
 }
 
 export function calculateMatchPoints(prediction: MatchPrediction, result: MatchResult) {
   const reasons: ScoreReason[] = [];
-  const predictionOutcome = outcome(prediction.homeScore, prediction.awayScore);
-  const resultOutcome = outcome(result.homeScore, result.awayScore);
-  const correctOutcome = predictionOutcome === resultOutcome;
+  const predictionOutcome = matchOutcome(prediction.homeScore, prediction.awayScore);
+  const resultOutcome = matchOutcome(result.homeScore, result.awayScore);
+  const resultAdvancerTeamId = result.winnerTeamId ?? result.penaltyWinnerTeamId ?? null;
+  const usesAdvancer =
+    isAdvancerScoringStage(prediction.stage) &&
+    prediction.predictedAdvancerTeamId !== null &&
+    prediction.predictedAdvancerTeamId !== undefined &&
+    resultAdvancerTeamId !== null;
+  const correctOutcome = usesAdvancer ? prediction.predictedAdvancerTeamId === resultAdvancerTeamId : predictionOutcome === resultOutcome;
+  const timing = resolveFixtureTiming(prediction.predictedAt, prediction.kickoffAt, prediction.stage);
+  const stage = resolveMatchStageMultiplier(prediction.stage);
 
-  if (correctOutcome) {
-    reasons.push({ code: "correct_outcome", points: 3, description: "Correct match outcome" });
-  } else {
-    reasons.push({ code: "wrong_outcome", points: -1, description: "Wrong match outcome penalty" });
+  if (!timing.eligible) {
+    return {
+      total: 0,
+      basePoints: 0,
+      timing,
+      stage,
+      reasons: [{ code: "after_kickoff", points: 0, description: "Prediction submitted after kickoff" }],
+    };
+  }
+
+  if (!correctOutcome) {
+    return {
+      total: 0,
+      basePoints: 0,
+      timing,
+      stage,
+      reasons: [
+        {
+          code: usesAdvancer ? "wrong_advancer" : "wrong_outcome",
+          points: 0,
+          description: usesAdvancer ? "Wrong advancing team" : "Wrong match outcome",
+        },
+      ],
+    };
+  }
+
+  reasons.push({
+    code: usesAdvancer ? "correct_advancer" : "correct_outcome",
+    points: 4,
+    description: usesAdvancer ? "Correct advancing team" : "Correct match outcome",
+  });
+
+  if (result.awarded) {
+    const basePoints = reasons.reduce((sum, reason) => sum + reason.points, 0);
+    return {
+      total: applyBasisPointMultiplier(basePoints, timing.multiplierBP, stage.multiplierBP),
+      basePoints,
+      timing,
+      stage,
+      reasons,
+    };
   }
 
   if (prediction.homeScore === result.homeScore && prediction.awayScore === result.awayScore) {
-    reasons.push({ code: "exact_score", points: 5, description: "Exact score bonus" });
+    reasons.push({ code: "exact_score", points: 6, description: "Exact score bonus" });
   }
 
   if (prediction.homeScore - prediction.awayScore === result.homeScore - result.awayScore) {
     reasons.push({ code: "goal_difference", points: 2, description: "Correct goal difference" });
   }
 
-  if (prediction.homeScore === result.homeScore || prediction.awayScore === result.awayScore) {
-    reasons.push({ code: "team_goals", points: 1, description: "Correct goals for one team" });
+  if (prediction.homeScore === result.homeScore) {
+    reasons.push({ code: "home_goals", points: 1, description: "Correct home team goals" });
   }
 
-  if (prediction.homeScore + prediction.awayScore === result.homeScore + result.awayScore) {
-    reasons.push({ code: "total_goals", points: 1, description: "Correct total goals" });
+  if (prediction.awayScore === result.awayScore) {
+    reasons.push({ code: "away_goals", points: 1, description: "Correct away team goals" });
   }
 
-  const earlyHours = hoursBeforeKickoff(prediction.predictedAt, prediction.kickoffAt);
-  if (earlyHours >= 72) {
-    reasons.push({ code: "early_save_72h", points: 2, description: "Saved at least 72 hours before kickoff" });
-  } else if (earlyHours >= 24) {
-    reasons.push({ code: "early_save_24h", points: 1, description: "Saved at least 24 hours before kickoff" });
-  }
-
-  if (prediction.boostApplied) {
-    reasons.push(
-      correctOutcome
-        ? { code: "boost_correct", points: 2, description: "Boosted correct outcome" }
-        : { code: "boost_wrong", points: -1, description: "Boosted wrong outcome penalty" },
-    );
-  }
+  const basePoints = reasons.reduce((sum, reason) => sum + reason.points, 0);
 
   return {
-    total: reasons.reduce((sum, reason) => sum + reason.points, 0),
+    total: applyBasisPointMultiplier(basePoints, timing.multiplierBP, stage.multiplierBP),
+    basePoints,
+    timing,
+    stage,
     reasons,
   };
 }
