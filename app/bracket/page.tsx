@@ -8,6 +8,8 @@ import { deriveWorldCupDeadlines } from "@/lib/scoring/deadlines";
 export const dynamic = "force-dynamic";
 
 const GROUP_LETTERS = "ABCDEFGHIJKL".split("");
+const FALLBACK_KNOCKOUT_OPEN_AT = "2026-06-28T00:00:00.000Z";
+const FALLBACK_KNOCKOUT_LOCK_AT = "2026-06-28T19:00:00.000Z";
 
 type TournamentPredictionRow = {
   id: string | number;
@@ -68,6 +70,45 @@ function stringRecord(value: unknown) {
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [key, typeof item === "string" ? item : null]),
   );
+}
+
+function safeIso(value: string | null | undefined, fallback: string) {
+  if (!value) return fallback;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? new Date(time).toISOString() : fallback;
+}
+
+function plusHours(value: string, hours: number) {
+  return new Date(new Date(value).getTime() + hours * 36e5).toISOString();
+}
+
+function minusHours(value: string, hours: number) {
+  return new Date(new Date(value).getTime() - hours * 36e5).toISOString();
+}
+
+function openBeforeLock(openAt: string, lockAt: string) {
+  const open = new Date(openAt).getTime();
+  const lock = new Date(lockAt).getTime();
+  if (Number.isFinite(open) && Number.isFinite(lock) && open < lock) return new Date(open).toISOString();
+  return minusHours(lockAt, 19);
+}
+
+function deriveKnockoutWindow(matches: Array<{ kickoffAt?: string | null; groupName?: string | null; round?: string | null; stage?: string | null }>) {
+  const sorted = [...matches]
+    .filter((match) => match.kickoffAt)
+    .sort((a, b) => new Date(a.kickoffAt ?? "").getTime() - new Date(b.kickoffAt ?? "").getTime());
+  const lastGroupKickoff = [...sorted].reverse().find((match) => match.groupName)?.kickoffAt ?? null;
+  const firstRoundOf32Kickoff =
+    sorted.find((match) => {
+      const text = `${match.round ?? ""} ${match.stage ?? ""}`.toLowerCase();
+      return text.includes("round of 32") || text.includes("round_of_32");
+    })?.kickoffAt ?? null;
+  const knockoutLockAt = safeIso(firstRoundOf32Kickoff, FALLBACK_KNOCKOUT_LOCK_AT);
+  const knockoutOpenAt = lastGroupKickoff ? plusHours(safeIso(lastGroupKickoff, FALLBACK_KNOCKOUT_OPEN_AT), 3) : FALLBACK_KNOCKOUT_OPEN_AT;
+  return {
+    knockoutOpenAt: openBeforeLock(safeIso(knockoutOpenAt, FALLBACK_KNOCKOUT_OPEN_AT), knockoutLockAt),
+    knockoutLockAt,
+  };
 }
 
 function parseSavedPath(value: unknown): SavedTournamentPath | null {
@@ -224,6 +265,7 @@ export default async function BracketPage() {
   const [worldCupData, saved, audit] = await Promise.all([getWorldCupDashboardData(), getSavedTournamentPath(auth.user?.id), getOwnBracketAudit(auth.user?.id)]);
   const firstKickoffAt = worldCupData.matches[0]?.kickoffAt ?? null;
   const deadlines = deriveWorldCupDeadlines(worldCupData.matches);
+  const bracketDeadlines = { ...deadlines, ...deriveKnockoutWindow(worldCupData.matches) };
   const now = Date.now();
   const groupPointValues = Object.fromEntries(
     worldCupData.groups.map((group) => {
@@ -262,7 +304,7 @@ export default async function BracketPage() {
       groups={worldCupData.groups}
       signedIn={Boolean(auth.user)}
       firstKickoffAt={firstKickoffAt}
-      deadlines={deadlines}
+      deadlines={bracketDeadlines}
       groupPointValues={groupPointValues}
       initialPath={saved.path}
       savedAt={saved.updatedAt}
