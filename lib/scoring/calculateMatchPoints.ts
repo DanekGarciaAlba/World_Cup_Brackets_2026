@@ -23,7 +23,7 @@ export function isAdvancerScoringStage(stage?: string | null) {
 export function calculateMatchPoints(prediction: MatchPrediction, result: MatchResult) {
   const reasons: ScoreReason[] = [];
   const predictionWithAdvancer = prediction as MatchPrediction & { predictedAdvancerTeamId?: number | null; stage?: string | null };
-  const resultWithAdvancer = result as MatchResult & { winnerTeamId?: number | null; penaltyWinnerTeamId?: number | null };
+  const resultWithAdvancer = result as MatchResult & { winnerTeamId?: number | null; penaltyWinnerTeamId?: number | null; awarded?: boolean | null };
   const predictionOutcome = matchOutcome(prediction.homeScore, prediction.awayScore);
   const resultOutcome = matchOutcome(result.homeScore, result.awayScore);
   const resultAdvancerTeamId = resultWithAdvancer.winnerTeamId ?? resultWithAdvancer.penaltyWinnerTeamId ?? null;
@@ -68,7 +68,7 @@ export function calculateMatchPoints(prediction: MatchPrediction, result: MatchR
     description: usesAdvancer ? "Correct advancing team" : "Correct match outcome",
   });
 
-  if (result.awarded) {
+  if (resultWithAdvancer.awarded) {
     const basePoints = reasons.reduce((sum, reason) => sum + reason.points, 0);
     return {
       total: applyBasisPointMultiplier(basePoints, timing.multiplierBP, stage.multiplierBP),
