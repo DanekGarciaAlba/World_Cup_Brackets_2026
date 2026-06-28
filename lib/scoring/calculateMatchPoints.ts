@@ -22,15 +22,17 @@ export function isAdvancerScoringStage(stage?: string | null) {
 
 export function calculateMatchPoints(prediction: MatchPrediction, result: MatchResult) {
   const reasons: ScoreReason[] = [];
+  const predictionWithAdvancer = prediction as MatchPrediction & { predictedAdvancerTeamId?: number | null };
+  const resultWithAdvancer = result as MatchResult & { winnerTeamId?: number | null; penaltyWinnerTeamId?: number | null };
   const predictionOutcome = matchOutcome(prediction.homeScore, prediction.awayScore);
   const resultOutcome = matchOutcome(result.homeScore, result.awayScore);
-  const resultAdvancerTeamId = result.winnerTeamId ?? result.penaltyWinnerTeamId ?? null;
+  const resultAdvancerTeamId = resultWithAdvancer.winnerTeamId ?? resultWithAdvancer.penaltyWinnerTeamId ?? null;
   const usesAdvancer =
     isAdvancerScoringStage(prediction.stage) &&
-    prediction.predictedAdvancerTeamId !== null &&
-    prediction.predictedAdvancerTeamId !== undefined &&
+    predictionWithAdvancer.predictedAdvancerTeamId !== null &&
+    predictionWithAdvancer.predictedAdvancerTeamId !== undefined &&
     resultAdvancerTeamId !== null;
-  const correctOutcome = usesAdvancer ? prediction.predictedAdvancerTeamId === resultAdvancerTeamId : predictionOutcome === resultOutcome;
+  const correctOutcome = usesAdvancer ? predictionWithAdvancer.predictedAdvancerTeamId === resultAdvancerTeamId : predictionOutcome === resultOutcome;
   const timing = resolveFixtureTiming(prediction.predictedAt, prediction.kickoffAt, prediction.stage);
   const stage = resolveMatchStageMultiplier(prediction.stage);
 
