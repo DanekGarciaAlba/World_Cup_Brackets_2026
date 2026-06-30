@@ -21,6 +21,8 @@ export type MatchSummary = {
   venueName: string | null;
   homeScore: number | null;
   awayScore: number | null;
+  penaltyHomeScore: number | null;
+  penaltyAwayScore: number | null;
   homeTeam: TeamSummary | null;
   awayTeam: TeamSummary | null;
 };
@@ -109,6 +111,8 @@ function matchToSummary(match: any, teamsById: Map<number, TeamSummary>): MatchS
     venueName: typeof match.venue_name === "string" ? match.venue_name : null,
     homeScore: typeof match.home_score === "number" ? match.home_score : null,
     awayScore: typeof match.away_score === "number" ? match.away_score : null,
+    penaltyHomeScore: typeof match.penalty_home_score === "number" ? match.penalty_home_score : null,
+    penaltyAwayScore: typeof match.penalty_away_score === "number" ? match.penalty_away_score : null,
     homeTeam: Number.isFinite(homeTeamId) ? teamsById.get(homeTeamId) ?? null : null,
     awayTeam: Number.isFinite(awayTeamId) ? teamsById.get(awayTeamId) ?? null : null,
   };
@@ -139,18 +143,18 @@ export async function getWorldCupDashboardData(): Promise<DashboardData> {
     supabase.from("teams").select("id,name,code,country,group_name,logo_url").limit(500),
     supabase
       .from("matches")
-      .select("id,round,group_name,stage,kickoff_at,status,venue_name,home_team_id,away_team_id,home_score,away_score")
+      .select("id,round,group_name,stage,kickoff_at,status,venue_name,home_team_id,away_team_id,home_score,away_score,penalty_home_score,penalty_away_score")
       .order("kickoff_at", { ascending: true })
       .limit(150),
     supabase
       .from("matches")
-      .select("id,round,group_name,stage,kickoff_at,status,venue_name,home_team_id,away_team_id,home_score,away_score")
+      .select("id,round,group_name,stage,kickoff_at,status,venue_name,home_team_id,away_team_id,home_score,away_score,penalty_home_score,penalty_away_score")
       .gte("kickoff_at", now)
       .order("kickoff_at", { ascending: true })
       .limit(8),
     supabase
       .from("matches")
-      .select("id,round,group_name,stage,kickoff_at,status,venue_name,home_team_id,away_team_id,home_score,away_score")
+      .select("id,round,group_name,stage,kickoff_at,status,venue_name,home_team_id,away_team_id,home_score,away_score,penalty_home_score,penalty_away_score")
       .in("status", ["live", "halftime"])
       .order("kickoff_at", { ascending: true })
       .limit(1),

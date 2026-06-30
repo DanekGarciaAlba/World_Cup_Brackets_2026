@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getWorldCupDashboardData } from "@/lib/data/worldCupData";
 import { deriveWorldCupDeadlines } from "@/lib/scoring/deadlines";
 import { parseDefaultedBracketSegments } from "@/lib/bracket/defaultPredictionMetadata";
-import { assignKnockoutMatchNumbers } from "@/lib/bracket/tournamentPathRules";
+import { assignKnockoutMatchNumbers, resolveKnockoutWinnerTeamId } from "@/lib/bracket/tournamentPathRules";
 
 export const dynamic = "force-dynamic";
 
@@ -144,17 +144,12 @@ function knockoutWinnerTeamId(match: {
   status?: string | null;
   homeScore?: number | null;
   awayScore?: number | null;
+  penaltyHomeScore?: number | null;
+  penaltyAwayScore?: number | null;
   homeTeam?: { id: number } | null;
   awayTeam?: { id: number } | null;
 }) {
-  if (match.status !== "finished" || match.homeScore === null || match.awayScore === null) return null;
-  if (!match.homeTeam?.id || !match.awayTeam?.id) return null;
-  const homeScore = Number(match.homeScore);
-  const awayScore = Number(match.awayScore);
-  if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) return null;
-  if (homeScore > awayScore) return Number(match.homeTeam.id);
-  if (awayScore > homeScore) return Number(match.awayTeam.id);
-  return null;
+  return resolveKnockoutWinnerTeamId(match);
 }
 
 function knockoutMatchLocksByNo(matches: Array<{ kickoffAt?: string | null; round?: string | null; stage?: string | null }>, nowMs: number) {
@@ -174,7 +169,7 @@ function knockoutMatchLocksByNo(matches: Array<{ kickoffAt?: string | null; roun
   );
 }
 
-function actualKnockoutWinnersByNo(matches: Array<{ kickoffAt?: string | null; round?: string | null; stage?: string | null; status?: string | null; homeScore?: number | null; awayScore?: number | null; homeTeam?: { id: number } | null; awayTeam?: { id: number } | null }>) {
+function actualKnockoutWinnersByNo(matches: Array<{ kickoffAt?: string | null; round?: string | null; stage?: string | null; status?: string | null; homeScore?: number | null; awayScore?: number | null; penaltyHomeScore?: number | null; penaltyAwayScore?: number | null; homeTeam?: { id: number } | null; awayTeam?: { id: number } | null }>) {
   return Object.fromEntries(
     assignKnockoutMatchNumbers(matches)
       .map(({ matchNo, match }) => [String(matchNo), knockoutWinnerTeamId(match)] as const)

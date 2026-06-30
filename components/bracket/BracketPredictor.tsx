@@ -530,9 +530,11 @@ export function BracketPredictor({
     return actualWinnerId;
   };
   const effectiveWinnerIdForMatch = (matchNo: number, teams?: [PredictorTeam | null, PredictorTeam | null]) => {
+    const actualWinnerId = actualWinnerIdForMatch(matchNo, teams);
+    if (actualWinnerId) return actualWinnerId;
     const pickedWinnerId = Number(winnersByMatch[String(matchNo)]);
     if (Number.isFinite(pickedWinnerId) && pickedWinnerId > 0) return pickedWinnerId;
-    return actualWinnerIdForMatch(matchNo, teams);
+    return null;
   };
 
   const matches = useMemo(() => {
@@ -618,10 +620,10 @@ export function BracketPredictor({
           const pickedWinnerId = Number(winnersByMatch[String(match.matchNo)]);
           const actualWinnerId = Number(actualKnockoutWinnersByNo[String(match.matchNo)]);
           const winnerId =
-            Number.isFinite(pickedWinnerId) && pickedWinnerId > 0
-              ? pickedWinnerId
-              : Number.isFinite(actualWinnerId) && actualWinnerId > 0 && match.teams.some((team) => team?.id === actualWinnerId)
-                ? actualWinnerId
+            Number.isFinite(actualWinnerId) && actualWinnerId > 0 && match.teams.some((team) => team?.id === actualWinnerId)
+              ? actualWinnerId
+              : Number.isFinite(pickedWinnerId) && pickedWinnerId > 0
+                ? pickedWinnerId
                 : null;
           return winnerId ? [String(match.matchNo), winnerId] : null;
         })
@@ -962,17 +964,11 @@ export function BracketPredictor({
       return;
     }
 
-    const preservedLockedRoundOf32 = Object.fromEntries(
-      Object.entries(winnersByMatch).filter(([matchNo, winnerTeamId]) => {
-        const numericMatchNo = Number(matchNo);
-        return numericMatchNo >= 73 && numericMatchNo <= 88 && matchIsIndividuallyLocked(numericMatchNo) && Number(winnerTeamId) > 0;
-      }),
-    );
-    setWinnersByMatch(preservedLockedRoundOf32);
+    setWinnersByMatch({});
     toast.info("Knockout picks cleared", {
       description:
-        Object.keys(preservedLockedRoundOf32).length > 0
-          ? "Locked Round of 32 picks stayed in place. Editable future picks were cleared."
+        Object.keys(actualKnockoutWinnersByNo).length > 0
+          ? "Your draft picks were cleared. Finished Round of 32 results stay visible as true winners."
           : "Group rankings and third-place selections stayed in place.",
     });
   }
@@ -1441,6 +1437,7 @@ export function BracketPredictor({
             onSummary={() => showStep("summary")}
             complete={complete}
             knockoutMatchLocksByNo={knockoutMatchLocksByNo}
+            actualWinnersByMatch={actualKnockoutWinnersByNo}
           />
         ) : null}
 
@@ -2852,6 +2849,7 @@ function BracketStage({
   onSummary,
   complete,
   knockoutMatchLocksByNo,
+  actualWinnersByMatch,
 }: {
   rounds: Round[];
   winnersByMatch: Record<string, number | null>;
@@ -2874,6 +2872,7 @@ function BracketStage({
   onSummary: () => void;
   complete: boolean;
   knockoutMatchLocksByNo: Record<string, KnockoutMatchLock>;
+  actualWinnersByMatch: Record<string, number | null>;
 }) {
   const missingByRound = rounds
     .map((round) => ({
@@ -2982,13 +2981,13 @@ function BracketStage({
       </div>
 
       <div className="2xl:hidden">
-        {activeRound ? <RoundColumn round={activeRound} winnersByMatch={winnersByMatch} knockoutMatchLocksByNo={knockoutMatchLocksByNo} onPick={onPick} mobile /> : null}
+        {activeRound ? <RoundColumn round={activeRound} winnersByMatch={winnersByMatch} knockoutMatchLocksByNo={knockoutMatchLocksByNo} actualWinnersByMatch={actualWinnersByMatch} onPick={onPick} mobile /> : null}
       </div>
 
       <div className="hidden max-h-[calc(100vh-18rem)] overflow-auto pb-2 pr-2 2xl:block">
         <div className="bracket-rounds-board grid min-w-[1180px] grid-cols-[1.2fr_1fr_.9fr_.82fr_.82fr_.7fr] gap-2">
           {rounds.map((round) => (
-            <RoundColumn key={round.key} round={round} winnersByMatch={winnersByMatch} knockoutMatchLocksByNo={knockoutMatchLocksByNo} onPick={onPick} />
+            <RoundColumn key={round.key} round={round} winnersByMatch={winnersByMatch} knockoutMatchLocksByNo={knockoutMatchLocksByNo} actualWinnersByMatch={actualWinnersByMatch} onPick={onPick} />
           ))}
         </div>
       </div>
@@ -3018,12 +3017,14 @@ function RoundColumn({
   round,
   winnersByMatch,
   knockoutMatchLocksByNo,
+  actualWinnersByMatch,
   onPick,
   mobile = false,
 }: {
   round: Round;
   winnersByMatch: Record<string, number | null>;
   knockoutMatchLocksByNo: Record<string, KnockoutMatchLock>;
+  actualWinnersByMatch: Record<string, number | null>;
   onPick: (match: BracketMatch, team: PredictorTeam | null) => void;
   mobile?: boolean;
 }) {
@@ -3043,6 +3044,7 @@ function RoundColumn({
             key={match.matchNo}
             match={match}
             winnerId={winnersByMatch[String(match.matchNo)] ?? null}
+            actualWinnerId={actualWinnersByMatch[String(match.matchNo)] ?? null}
             lockInfo={knockoutMatchLocksByNo[String(match.matchNo)] ?? null}
             onPick={onPick}
           />
@@ -3055,17 +3057,20 @@ function RoundColumn({
 function MatchCard({
   match,
   winnerId,
+  actualWinnerId,
   lockInfo,
   onPick,
 }: {
   match: BracketMatch;
   winnerId: number | null;
+  actualWinnerId: number | null;
   lockInfo: KnockoutMatchLock | null;
   onPick: (match: BracketMatch, team: PredictorTeam | null) => void;
 }) {
   const pending = !match.teams[0] || !match.teams[1];
   const primeMatch = match.roundKey === "semiFinals" || match.roundKey === "thirdPlace" || match.roundKey === "final";
   const lockedRoundOf32 = match.roundKey === "roundOf32" && Boolean(lockInfo?.locked);
+  const hasTrueWinner = Boolean(actualWinnerId && match.teams.some((team) => team?.id === actualWinnerId));
 
   return (
     <article
@@ -3092,12 +3097,13 @@ function MatchCard({
               key={`${match.matchNo}-${index}`}
               type="button"
               className={cn(
-                "bracket-match-team grid min-h-9 grid-cols-[2rem_minmax(0,1fr)_3.1rem] items-center gap-1.5 rounded-md border px-1.5 text-left transition active:translate-y-px md:min-h-10 md:grid-cols-[2.3rem_minmax(0,1fr)_3.6rem] md:gap-2 md:px-2",
+                "bracket-match-team grid min-h-9 grid-cols-[2rem_minmax(0,1fr)_4rem] items-center gap-1.5 rounded-md border px-1.5 text-left transition active:translate-y-px md:min-h-10 md:grid-cols-[2.3rem_minmax(0,1fr)_4.6rem] md:gap-2 md:px-2",
                 isWinner
                   ? "is-winner !border-trophy-gold/60 !bg-trophy-gold/15 !text-foreground !shadow-[0_0_0_1px_rgba(214,178,96,.28),0_0_28px_rgba(214,178,96,.22),0_16px_42px_rgba(214,178,96,.18)]"
                   : "border-white/10 bg-navy-950/55 text-muted-foreground hover:border-white/20 hover:bg-white/[0.06] hover:text-foreground",
                 lockedRoundOf32 && !isWinner && "opacity-70 hover:border-white/10 hover:bg-navy-950/55 hover:text-muted-foreground",
               )}
+              title={isWinner && hasTrueWinner && team?.id === actualWinnerId ? "True winner from the official result" : undefined}
               onClick={() => onPick(match, team)}
             >
               <TeamMark team={team} fallback={match.slotLabels[index] ?? "TBD"} />
@@ -3107,7 +3113,7 @@ function MatchCard({
               </span>
               <span
                 className={cn(
-                  "bracket-pick-state inline-flex min-w-[2.7rem] justify-center justify-self-end rounded-full border px-1 py-1 text-[0.52rem] font-black uppercase leading-none md:min-w-[3.15rem] md:px-1.5 md:text-[0.58rem]",
+                  "bracket-pick-state inline-flex min-w-[3.7rem] justify-center justify-self-end rounded-full border px-1 py-1 text-[0.52rem] font-black uppercase leading-none md:min-w-[4.25rem] md:px-1.5 md:text-[0.58rem]",
                   isWinner
                     ? "is-winner !border-trophy-gold/60 !bg-trophy-gold/20 !text-trophy-gold shadow-[0_0_18px_rgba(214,178,96,.18)]"
                     : lockedRoundOf32
@@ -3115,7 +3121,7 @@ function MatchCard({
                       : "border-white/10 bg-white/[0.045] text-muted-foreground",
                 )}
               >
-                {isWinner ? "Winner" : lockedRoundOf32 ? "Locked" : "Pick"}
+                {isWinner ? (hasTrueWinner && team?.id === actualWinnerId ? "True winner" : "Winner") : lockedRoundOf32 ? "Locked" : "Pick"}
               </span>
             </button>
           );

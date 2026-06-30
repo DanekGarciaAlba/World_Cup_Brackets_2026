@@ -42,6 +42,21 @@ export type KnockoutScheduledMatch = {
   kickoffAt?: string | null;
   round?: string | null;
   stage?: string | null;
+  status?: string | null;
+  home_team_id?: number | string | null;
+  away_team_id?: number | string | null;
+  homeTeamId?: number | string | null;
+  awayTeamId?: number | string | null;
+  homeTeam?: { id?: number | string | null } | null;
+  awayTeam?: { id?: number | string | null } | null;
+  home_score?: number | string | null;
+  away_score?: number | string | null;
+  homeScore?: number | string | null;
+  awayScore?: number | string | null;
+  penalty_home_score?: number | string | null;
+  penalty_away_score?: number | string | null;
+  penaltyHomeScore?: number | string | null;
+  penaltyAwayScore?: number | string | null;
 };
 
 export type KnockoutPointDetail = {
@@ -84,10 +99,44 @@ function kickoffOf(match: KnockoutScheduledMatch) {
   return match.kickoff_at ?? match.kickoffAt ?? null;
 }
 
+function numberOrNull(value: unknown) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function matchTeamIds(match: KnockoutScheduledMatch) {
+  return [
+    numberOrNull(match.home_team_id ?? match.homeTeamId ?? match.homeTeam?.id),
+    numberOrNull(match.away_team_id ?? match.awayTeamId ?? match.awayTeam?.id),
+  ] as const;
+}
+
 function timeOf(value: string | Date | null | undefined) {
   if (!value) return null;
   const time = new Date(value).getTime();
   return Number.isFinite(time) ? time : null;
+}
+
+export function resolveKnockoutWinnerTeamId(match: KnockoutScheduledMatch) {
+  if (String(match.status ?? "").toLowerCase() !== "finished") return null;
+  const [homeTeamId, awayTeamId] = matchTeamIds(match);
+  if (homeTeamId === null || awayTeamId === null) return null;
+
+  const homeScore = numberOrNull(match.home_score ?? match.homeScore);
+  const awayScore = numberOrNull(match.away_score ?? match.awayScore);
+  if (homeScore !== null && awayScore !== null) {
+    if (homeScore > awayScore) return homeTeamId;
+    if (awayScore > homeScore) return awayTeamId;
+  }
+
+  const penaltyHomeScore = numberOrNull(match.penalty_home_score ?? match.penaltyHomeScore);
+  const penaltyAwayScore = numberOrNull(match.penalty_away_score ?? match.penaltyAwayScore);
+  if (penaltyHomeScore !== null && penaltyAwayScore !== null) {
+    if (penaltyHomeScore > penaltyAwayScore) return homeTeamId;
+    if (penaltyAwayScore > penaltyHomeScore) return awayTeamId;
+  }
+
+  return null;
 }
 
 export function isRoundOf32MatchNo(matchNo: number) {
